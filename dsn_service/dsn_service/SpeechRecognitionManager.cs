@@ -163,6 +163,12 @@ namespace DSN {
 
         private void DSN_SpeechRecognized(object sender, SpeechRecognizedEventArgs e) {
             float minConfidence = isDialogueMode ? dialogueMinimumConfidence : commandMinimumConfidence;
+
+            foreach(RecognizedPhrase alt in e.Result.Alternates)
+            {
+                Trace.TraceInformation("Alternate {0}, conf={1}", alt.Text, alt.Confidence);
+            }
+
             if (e.Result.Confidence >= minConfidence) {
                 Trace.TraceInformation("Recognized phrase '{0}' (Confidence: {1})", e.Result.Text, e.Result.Confidence);
                 OnDialogueLineRecognized?.Invoke(e.Result);

@@ -17,10 +17,13 @@ namespace DSN {
         private System.Object dialogueLock = new System.Object();
         private DialogueList currentDialogue = null;
         private FavoritesList favoritesList = null;
+        private SpellBook spellBook = null;
+        private CommandList commandList = null;
         private SpeechRecognitionManager recognizer;
         private Thread submissionThread;
         private Thread listenThread;
         private BlockingCollection<string> commandQueue;
+        private ShoutsKnowledge shoutsKnowledge;
 
         public SkyrimInterop(Configuration config, ConsoleInput consoleInput) {
             this.config = config;
@@ -30,12 +33,16 @@ namespace DSN {
         public void Start() {
             try {
                 favoritesList = new FavoritesList(config);
+                spellBook = new SpellBook(config);
+                shoutsKnowledge = new ShoutsKnowledge(config);
+                commandList = config.GetConsoleCommandList();
+
                 commandQueue = new BlockingCollection<string>();
                 recognizer = new SpeechRecognitionManager(config);
                 recognizer.OnDialogueLineRecognized += Recognizer_OnDialogueLineRecognized;
 
                 // Start in command-mode
-                recognizer.StartSpeechRecognition(false, config.GetConsoleCommandList(), favoritesList);
+                recognizer.StartSpeechRecognition(false, commandList, favoritesList, spellBook, shoutsKnowledge);
 
                 listenThread = new Thread(ListenForInput);
                 submissionThread = new Thread(SubmitCommands);
@@ -100,26 +107,33 @@ namespace DSN {
 
                     string[] tokens = input.Split('|');
                     string command = tokens[0];
+
                     if (command.Equals("START_DIALOGUE")) {
+                        // Switch to dialogue mode
                         consoleInput.currentDialogue = input;
                         lock (dialogueLock) {
                             currentDialogue = DialogueList.Parse(string.Join("|", tokens, 1, tokens.Length - 1), config);
                         }
-                        // Switch to dialogue mode
-                        recognizer.StartSpeechRecognition(true, currentDialogue);
                     } else if (command.Equals("STOP_DIALOGUE")) {
                         consoleInput.currentDialogue = null;
                         // Switch to command mode
-                        recognizer.StartSpeechRecognition(false, config.GetConsoleCommandList(), favoritesList);
                         lock (dialogueLock) {
                             currentDialogue = null;
                         }
                     } else if (command.Equals("FAVORITES")) {
                         consoleInput.currentFavoritesList = input;
                         favoritesList.Update(string.Join("|", tokens, 1, tokens.Length - 1));
-                        if(currentDialogue == null) {
-                            recognizer.StartSpeechRecognition(false, config.GetConsoleCommandList(), favoritesList);
-                        }
+                    } else if(command.Equals("SPELLBOOK")) {
+                        spellBook.UpdateSpells(tokens.Skip(1));
+                    } else if(command.Equals("SHOUTS")) {
+                        shoutsKnowledge.UpdateShouts(tokens.Skip(1));
+                    }
+
+
+                    if(currentDialogue != null) {
+                        recognizer.StartSpeechRecognition(true, currentDialogue);
+                    } else {
+                        recognizer.StartSpeechRecognition(false, commandList, favoritesList, spellBook, shoutsKnowledge);
                     }
                 }
             } catch (Exception ex) {
@@ -138,13 +152,29 @@ namespace DSN {
                 } else {
                     string command = favoritesList.GetCommandForResult(result);
                     if(command != null) {
-                        SubmitCommand("EQUIP|" + command);
-                    } else {
-                        command = config.GetConsoleCommandList().GetCommandForPhrase(result.Grammar);
-                        if (command != null) {
-                            SubmitCommand("COMMAND|" + command);
-                        }
+                        SubmitCommand(command);
+                        return;
                     }
+
+                    command = spellBook.GetCommandForResult(result);
+                    if(command != null) {
+                        SubmitCommand(command);
+                        return;
+                    }
+
+                    command = shoutsKnowledge.GetCommandForResult(result);
+                    if (command != null) {
+                        SubmitCommand(command);
+                        return;
+                    }
+
+                    command = commandList.GetCommandForPhrase(result.Grammar);
+                    if (command != null) {
+                        SubmitCommand(command);
+                        return;
+                    }
+
+                    Trace.TraceWarning("Nothing regonised for grammer {} ", result.Grammar);
                 }
             }
         }

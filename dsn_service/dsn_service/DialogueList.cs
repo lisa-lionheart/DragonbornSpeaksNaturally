@@ -64,8 +64,8 @@ namespace DSN {
             return -1;
         }
 
-        public List<Grammar> GetGrammars() {
-            return new List<Grammar>(this.grammarToIndex.Keys);
+        public ICollection<Grammar> GetGrammars() {
+            return this.grammarToIndex.Keys;
         }
 
         public void PrintToTrace() {

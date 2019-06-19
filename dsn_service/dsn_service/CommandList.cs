@@ -27,7 +27,7 @@ namespace DSN {
 
         public string GetCommandForPhrase(Grammar grammar) {
             if (commandsByPhrase.ContainsKey(grammar))
-                return commandsByPhrase[grammar];
+                return "COMMAND|" + commandsByPhrase[grammar];
             return null;
         }
 
@@ -38,8 +38,8 @@ namespace DSN {
             }
         }
 
-        public List<Grammar> GetGrammars() {
-            return commandsByPhrase.Keys.ToList();
+        public ICollection<Grammar> GetGrammars() {
+            return commandsByPhrase.Keys;
         }
     }
 }

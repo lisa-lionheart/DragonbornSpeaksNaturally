@@ -12,6 +12,8 @@ struct FakeMagicFavorites {
 	UnkFormArray	hotkeys;	// 28
 };
 
+class TESSpellList;
+
 struct FavoriteMenuItem {
 	UInt32 TESFormId;
 	SInt32 itemId;
@@ -22,7 +24,7 @@ struct FavoriteMenuItem {
 
 struct EquipItem {
 	UInt32 TESFormId;
-	SInt32 itemId;
+	UInt32 itemId;
 	UInt8 itemType;
 	SInt32 hand; // 0 = no hand specified, 1 = right hand, 2 = left hand
 };
@@ -33,10 +35,20 @@ class FavoritesMenuManager
 
 public:
 	static FavoritesMenuManager* getInstance();
-	void RefreshFavorites();
+
+	void RefreshAll();
+
 	void ProcessEquipCommands();
 private:
+
+	void RefreshFavorites(PlayerCharacter* player);
+	void RefreshSpellBook(PlayerCharacter* player);
+	void RefreshShouts(TESSpellList& spells);
+
+
 	FavoritesMenuManager();
 	std::vector<FavoriteMenuItem> favorites;
 	std::string lastFavoritesCommand;
+	std::string lastSpellBookCommand;
+	std::string lastShoutsCommand;
 };

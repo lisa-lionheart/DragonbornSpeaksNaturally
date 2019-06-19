@@ -12,6 +12,11 @@
 #include "skse64/GameInput.h"
 #include "skse64/HashUtil.h"
 
+#include <sstream>
+#include <fstream>
+
+#include "Utils.h"
+
 FavoritesMenuManager* FavoritesMenuManager::instance = NULL;
 
 FavoritesMenuManager* FavoritesMenuManager::getInstance() {
@@ -21,6 +26,7 @@ FavoritesMenuManager* FavoritesMenuManager::getInstance() {
 }
 
 FavoritesMenuManager::FavoritesMenuManager(){}
+
 
 SInt32 fmCalcItemId(TESForm * form, BaseExtraList * extraList)
 {
@@ -104,10 +110,113 @@ std::vector<FavoriteMenuItem> ExtractFavorites(InventoryEntryData * inv) {
 	return menuItems;
 }
 
-void FavoritesMenuManager::RefreshFavorites() {
+void FavoritesMenuManager::RefreshAll() {
+	ASSERT_IS_GAME_THREAD();
 
-	PlayerCharacter *player = (*g_thePlayer);
+	PlayerCharacter* player = (*g_thePlayer);
 	if (player != NULL) {
+		RefreshFavorites(player);
+		RefreshSpellBook(player);
+
+		TESActorBase* actorBase = DYNAMIC_CAST(player->baseForm, TESForm, TESActorBase);
+		if (actorBase == NULL) {
+			Log::error("Player is not TESActorBase? WTF?");
+		} else {
+			RefreshShouts(actorBase->spellList);
+		}
+
+
+		Log::debug("Left hand slot: " + Utils::inspect(Utils::getEquippedSlot(player, kSlotId_Left)));
+		Log::debug("Right hand slot: " + Utils::inspect(Utils::getEquippedSlot(player, kSlotId_Right)));
+		Log::debug("Voice slot: " + Utils::inspect(Utils::getEquippedSlot(player, kSlotId_Voice)));
+	}
+}
+
+void FavoritesMenuManager::RefreshSpellBook(PlayerCharacter* player) {
+
+	PlayerCharacter::SpellArray& spells = player->addedSpells;
+
+	Log::info("Refreshing player spell book");
+
+	std::string command = "SPELLBOOK|";
+
+	for (UInt32 i = 0; i < spells.Length() ; i++) {
+		SpellItem* spell = spells.Get(i);
+		const char* typeString = NULL;
+		switch (spell->data.type) {
+
+		case SpellItem::kTypeSpell:
+			typeString = "SPELL";
+			break;
+		case SpellItem::kTypePower:
+		case SpellItem::kTypeLesserPower:
+			typeString = "POWER";
+			break;
+		}
+
+		if (typeString != NULL) {
+			Log::debug("Adding: " + std::string(spell->fullName.name.data) + " type: " + typeString + " flags: " + Utils::fmt_flags(spell->data.unk00.flags));
+			command += Utils::fmt_hex(spell->formID) + "," + typeString;
+			command += "," + std::string(spell->fullName.GetName());
+			switch (spell->data.castType)
+			{
+			case 1:
+				command += ",SINGLE";
+				break;
+			case 2:
+				command += ",CONTINOUS";
+				break;
+			default:
+				command += ",UNKNOWN";
+			}
+			command += "|";
+		} else {
+			Log::debug("Ignoring: " + std::string(spell->fullName.GetName()));
+		}
+	}
+
+	if (lastSpellBookCommand != command) {
+		Log::info(command);
+		SpeechRecognitionClient::getInstance()->WriteLine(command);
+		lastSpellBookCommand = command;
+	}	
+}
+
+/*
+* Sends shout data if has changed
+* Format SHOUTS|<formid>,<name>,<WOOP1>,[<WOOP2>,[<WOOP3>]]|....
+*/
+void FavoritesMenuManager::RefreshShouts(TESSpellList& spellList) {
+
+	Log::info("Refreshing player shouts");
+
+	std::string command = "SHOUTS|";
+
+	for (UInt32 i = 0; i < spellList.GetShoutCount(); i++) {
+		TESShout* shout = spellList.GetNthShout(i);
+		std::string name(shout->fullName.name.data);
+
+		Log::debug("Adding shout: " + name);
+		command += Utils::fmt_hex(shout->formID) + "," + name;
+
+		for (int j = 0; j < TESShout::Words::kNumWords; j++) {
+			TESWordOfPower* word = shout->words[j].word;
+			if ((word->flags & TESForm::kFlagPlayerKnows) == TESForm::kFlagPlayerKnows) {
+				std::string wordName(word->fullName.GetName());
+				command += "," + wordName;
+			}
+		}
+		command += "|";
+	}
+
+	if (lastShoutsCommand != command) {
+		Log::info(command);
+		SpeechRecognitionClient::getInstance()->WriteLine(command);
+		lastShoutsCommand = command;
+	}
+}
+
+void FavoritesMenuManager::RefreshFavorites(PlayerCharacter* player) {
 
 		// Clear current favorites
 		favorites.clear();
@@ -177,7 +286,7 @@ void FavoritesMenuManager::RefreshFavorites() {
 			lastFavoritesCommand = command;
 		}
 	}
-}
+
 
 static std::vector<std::string> split(const std::string &s, char delim) {
 	std::stringstream ss(s);
@@ -205,15 +314,11 @@ EquipItem parseEquipItem(std::string command) {
 	return item;
 }
 
-enum
-{
-	kSlotId_Default = 0,
-	kSlotId_Right = 1,
-	kSlotId_Left = 2
-};
 
 
 void FavoritesMenuManager::ProcessEquipCommands() {
+
+	ASSERT_IS_GAME_THREAD();
 
 	PlayerCharacter *player = (*g_thePlayer);
 	SpeechRecognitionClient *client = SpeechRecognitionClient::getInstance();
@@ -224,24 +329,20 @@ void FavoritesMenuManager::ProcessEquipCommands() {
 		TESForm * form = LookupFormByID(equipItem.TESFormId);
 		std::string hand = equipItem.hand == 1 ? "right" : "left";
 		if (form) {
-			std::stringstream formIdAsHex;
-
 			switch (equipItem.itemType) {
 			case 1: // Item
 				Equipper::EquipItem(player, form, equipItem.itemId, equipItem.hand);
 				break;
 			case 2: // Spell
-				formIdAsHex << std::hex << equipItem.TESFormId;
 				if (equipItem.hand == 0) {
-					client->EnqueueCommand("player.equipspell " + formIdAsHex.str() + " left");
-					client->EnqueueCommand("player.equipspell " + formIdAsHex.str() + " right");
+					client->EnqueueCommand("player.equipspell " + Utils::fmt_hex(equipItem.itemId) + " left");
+					client->EnqueueCommand("player.equipspell " + Utils::fmt_hex(equipItem.itemId) + " right");
 				} else {
-					client->EnqueueCommand("player.equipspell " + formIdAsHex.str() + " " + hand);
+					client->EnqueueCommand("player.equipspell " + Utils::fmt_hex(equipItem.itemId) + " " + hand);
 				}
 				break;
 			case 3: // Shout
-				formIdAsHex << std::hex << equipItem.TESFormId;
-				client->EnqueueCommand("player.equipshout " + formIdAsHex.str());
+				client->EnqueueCommand("player.equipshout " + Utils::fmt_hex(equipItem.itemId));
 				PlayerControls * controls = PlayerControls::GetSingleton();
 				break;
 			}

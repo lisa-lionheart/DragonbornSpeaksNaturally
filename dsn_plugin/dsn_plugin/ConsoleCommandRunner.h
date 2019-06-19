@@ -148,4 +148,15 @@ public:
 	//         switchwindow; sleep 50; tapkey ~; sleep 50; tapkey s a v e enter; sleep 50; tapkey ~
 	//
 	static void CustomCommandSwitchWindow(std::vector<std::string> params);
+
+
+
+	//
+	// Add a new command:
+	//         trycast [spellid] [left|right|voice]
+	//
+	// Description:
+	//         Check the player knows the spell, store current slot spell/item/shout, equip specified spell, cast
+	//         then return slot to previous state
+	static void CustomCommandTryCast(std::vector<std::string> params);
 };

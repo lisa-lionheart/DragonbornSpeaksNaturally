@@ -11,6 +11,8 @@ HANDLE g_hChildStd_IN_Wr = NULL;
 HANDLE g_hChildStd_OUT_Rd = NULL;
 HANDLE g_hChildStd_OUT_Wr = NULL;
 
+DWORD g_ClientThread = NULL;
+
 static std::vector<std::string> split(const std::string &s, char delim) {
 	std::stringstream ss(s);
 	std::string item;
@@ -50,7 +52,7 @@ void SpeechRecognitionClient::StartDialogue(DialogueList list) {
 		command.append("|");
 		command.append(list.lines[i]);
 	}
-	this->WriteLine(command);
+	WriteLine(command);
 }
 
 int SpeechRecognitionClient::ReadSelectedIndex() {
@@ -155,6 +157,7 @@ std::string SpeechRecognitionClient::ReadLine() {
 
 					// Remove \n
 					line.pop_back();
+					Log::debug("CLIENT << " + line);
 					return line;
 				}
 			}
@@ -167,11 +170,14 @@ std::string SpeechRecognitionClient::ReadLine() {
 
 void SpeechRecognitionClient::WriteLine(std::string line) {
 	DWORD dwWritten;
+	Log::debug("CLIENT >> " + line);
 	line.push_back('\n');
 	WriteFile(this->stdInWr, line.c_str(), line.length(), &dwWritten, NULL);
 }
 
 static DWORD WINAPI SpeechRecognitionClientThreadStart(void* ctx) {
+
+	g_ClientThread = GetCurrentThreadId();
 
 	extern std::string g_dllPath;
 

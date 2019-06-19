@@ -1,5 +1,6 @@
 #include "Equipper.h"
 #include "Log.h"
+#include "Utils.h"
 
 bool Equipper::CanEquipBothHands(Actor* actor, TESForm * item)
 {
@@ -126,6 +127,8 @@ void EquipItemById(Actor* thisActor, TESForm* item, SInt32 itemId, SInt32 slotId
 }
 
 void Equipper::EquipItem(PlayerCharacter *player, TESForm *item, SInt32 itemId, UInt32 slotId) {
+
+	ASSERT_IS_GAME_THREAD();
 
 	TESObjectARMO *armor = DYNAMIC_CAST(item, TESForm, TESObjectARMO);
 

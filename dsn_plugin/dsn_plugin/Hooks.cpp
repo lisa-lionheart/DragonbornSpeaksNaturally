@@ -11,8 +11,10 @@
 #include "SkyrimType.h"
 #include "ConsoleCommandRunner.h"
 #include "FavoritesMenuManager.h"
+#include "Utils.h"
 
 class RunCommandSink;
+
 
 static RunCommandSink *runCommandSink = NULL;
 static GFxMovieView* dialogueMenu = NULL;
@@ -22,8 +24,77 @@ static int lastMenuState = -1;
 typedef UInt32 getDefaultCompiler(void* unk01, char* compilerName, UInt32 unk03);
 typedef void executeCommand(UInt32* unk01, void* parser, char* command);
 
+
+struct Task {
+	std::function<void(void)> func;
+	bool blocking;
+	volatile bool done;
+};
+
+
+std::queue<Task*> taskQueue;
+std::mutex taskQueueLock;
+
+thread_local bool g_isGameThread = false;
+
+// Mark this is a game thread safe to call game code from
+void markGameThread() {
+	g_isGameThread = true;
+}
+
+bool isGameThread() {
+	return g_isGameThread;
+}
+
+void executeOnGameThread(const std::function<void(void)>& func, bool wait) {
+	Task* task = new Task();
+	task->func = func;
+	task->blocking = wait;
+
+	taskQueueLock.lock();
+	taskQueue.push(task);
+	taskQueueLock.unlock();
+
+	if (wait) {
+		Log::debug("Blocking on task");
+		while (!task->done) {
+			Sleep(1);
+		}
+		Log::debug("Finished Blocking on task");
+		delete task;
+	}
+}
+
+void executeNextDelayedActions() {
+	ASSERT_IS_GAME_THREAD();
+
+	while (true) {
+		taskQueueLock.lock();
+		Task* task = NULL;
+		if (taskQueue.size() > 0) {
+			task = taskQueue.front();
+			taskQueue.pop();
+		}
+		taskQueueLock.unlock();
+
+		if (task == NULL) {
+			return;
+		}
+
+		Log::debug("Executing game thread task " + Utils::fmt_hex((uint32_t)task));
+
+		task->func();
+		task->done = true;
+
+		if (!task->blocking) {
+			delete task;
+		}
+	}
+}
+
 static void __cdecl Hook_Invoke(GFxMovieView* movie, char * gfxMethod, GFxValue* argv, UInt32 argc)
 {
+	markGameThread();
 	if (argc >= 1)
 	{
 		GFxValue commandVal = argv[0];
@@ -49,15 +120,16 @@ static void __cdecl Hook_Invoke(GFxMovieView* movie, char * gfxMethod, GFxValue*
 			}
 			else if (g_SkyrimType == VR && strcmp(command, "UpdatePlayerInfo") == 0)
 			{
-				FavoritesMenuManager::getInstance()->RefreshFavorites();
+				FavoritesMenuManager::getInstance()->RefreshAll();
 			}
 		}
 	}
 }
 
 static void __cdecl Hook_PostLoad() {
+	markGameThread();
 	if (g_SkyrimType == VR) {
-		FavoritesMenuManager::getInstance()->RefreshFavorites();
+		FavoritesMenuManager::getInstance()->RefreshAll();
 	}
 }
 
@@ -65,16 +137,19 @@ static void runCommand() {
 	std::string command = SpeechRecognitionClient::getInstance()->PopCommand();
 	if (command != "") {
 		ConsoleCommandRunner::RunCommand(command);
-		Log::info("run command: " + command);
+		Log::info("Running command: " + command);
 	}
 
 	if (g_SkyrimType == VR) {
 		FavoritesMenuManager::getInstance()->ProcessEquipCommands();
 	}
+
+	executeNextDelayedActions();
 }
 
 class RunCommandSink : public BSTEventSink<InputEvent> {
 	EventResult ReceiveEvent(InputEvent ** evnArr, InputEventDispatcher * dispatcher) override {
+		markGameThread();
 		runCommand();
 		return kEvent_Continue;
 	}
@@ -82,6 +157,8 @@ class RunCommandSink : public BSTEventSink<InputEvent> {
 
 static void __cdecl Hook_Loop()
 {
+	markGameThread();
+
 	if (dialogueMenu != NULL)
 	{
 		// Menu exiting, avoid NPE

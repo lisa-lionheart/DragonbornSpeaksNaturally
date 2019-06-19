@@ -236,14 +236,14 @@ namespace DSN {
                     command += mainHandId;
                 }
 
-                return command;
+                return "EQUIP|" + command;
             }
 
             return null;
         }
 
-        public List<Grammar> GetGrammars() {
-            return new List<Grammar>(commandsByGrammar.Keys);
+        public ICollection<Grammar> GetGrammars() {
+            return commandsByGrammar.Keys;
         }
     }
 }
