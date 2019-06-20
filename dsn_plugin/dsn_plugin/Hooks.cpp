@@ -1,5 +1,6 @@
-  #include "Hooks.h"
+#include "Hooks.h"
 #include <string.h>
+#include <set>
 #include "Log.h"
 #include "common/IPrefix.h"
 #include "skse64_common/SafeWrite.h"
@@ -16,24 +17,32 @@
 class RunCommandSink;
 
 
-static RunCommandSink *runCommandSink = NULL;
+static RunCommandSink* runCommandSink = NULL;
+
 static GFxMovieView* dialogueMenu = NULL;
+
 static int desiredTopicIndex = 1;
 static int numTopics = 0;
 static int lastMenuState = -1;
-typedef UInt32 getDefaultCompiler(void* unk01, char* compilerName, UInt32 unk03);
-typedef void executeCommand(UInt32* unk01, void* parser, char* command);
+
+//typedef UInt32 getDefaultCompiler(void* unk01, char* compilerName, UInt32 unk03);
+//typedef void executeCommand(UInt32* unk01, void* parser, char* command);
 
 
-
-static void __cdecl Hook_Invoke(GFxMovieView* movie, char * gfxMethod, GFxValue* argv, UInt32 argc)
+// Hook of 
+// GfxMovieView::Invoke(const char* name, GFxValue* result, GFxValue* args, UInt32 numArgs);
+//
+static void __cdecl Hook_Invoke(GFxMovieView* movie, const char* gfxMethod, GFxValue* argv, UInt32 argc)
 {
+	TRACE_METHOD();
+
 	if (argc >= 1)
 	{
 		GFxValue commandVal = argv[0];
-		if (commandVal.type == 4) { // Command
+		if (commandVal.type == GFxValue::kType_String) { // Command
 			const char* command = commandVal.data.string;
-			//Log::info(command); // TEMP
+
+			//Log::debug("Command is: %s", command); // TEMP
 			if (strcmp(command, "PopulateDialogueList") == 0)
 			{
 				numTopics = (argc - 2) / 3;
@@ -59,24 +68,153 @@ static void __cdecl Hook_Invoke(GFxMovieView* movie, char * gfxMethod, GFxValue*
 	}
 }
 
-static void __cdecl Hook_PostLoad() {
+
+
+/*
+* Monitor the state of the game and update the service so that it can choose which
+* Activations should be avalible
+*/
+class GameStateController : public BSTEventSink<MenuOpenCloseEvent> {
+
+
+	std::set<std::string> filter;
+	MenuManager* mm;
+
+	std::string currentMenu = "None";
 	
-	if (g_SkyrimType == VR) {
+	bool isInCombat = false;
+	bool isWeaponDrawn = false;
+	bool isSneaking = false;
+
+	
+	void SendStateChange() {
+		TRACE_METHOD();
+
+		std::ostringstream msg;		
+		msg << "GAMESTATE|";
+		msg << currentMenu << "|";
+		msg << isInCombat << "|";
+		msg << isWeaponDrawn << "|";
+		msg << isSneaking;		
+
+		SpeechRecognitionClient::getInstance()->WriteLine(msg.str());
+	}
+
+public:
+	GameStateController() {
+		TRACE_METHOD();
+
+		mm = MenuManager::GetSingleton();
+		mm->menuOpenCloseEventDispatcher.AddEventSink(this);
+
+		filter.insert("TweenMenu"); // Inbetween menu when you want to open magic, inventory etc
+		filter.insert("MapMarkerTest3D"); // The map menu
+		filter.insert("StatsMenu");
+		filter.insert("FavoritesMenu");
+		filter.insert("Journal Menu");
+		filter.insert("Inventory Menu");
+	}
+
+	// Monitor opening and closing of menus
+	EventResult ReceiveEvent(MenuOpenCloseEvent* evn, EventDispatcher<MenuOpenCloseEvent>* dispatcher) override {
+		TRACE_METHOD();
+
+		std::string newState = currentMenu;
+
+		if (evn->opening) {
+			std::string menuName(evn->menuName.c_str());
+			if (filter.find(menuName) != filter.end()) {
+				newState = menuName;
+			} else {
+				Log::debug("Ignored %s", menuName.c_str());
+			}
+		} else {
+			std::string menuName(evn->menuName.c_str());
+			if (menuName == currentMenu) {
+				newState = "None";
+			}
+			Log::debug("Closed %s", menuName.c_str());
+		}
+
+		if (newState != currentMenu) {
+			Log::info("Menu State: %s -> %s", currentMenu.c_str(), newState.c_str());
+			currentMenu = newState;
+			SendStateChange();
+		}
+		return kEvent_Continue;
+	}
+
+	void UpdatePlayerState() {
+	
+		//TRACE_METHOD();
+
+		PlayerCharacter* player = (*g_thePlayer);
+		if (player == NULL) {
+			return;
+		}
+		
+		bool change = false;
+
+		
+		// Breaks, makes the players hands become invisible??
+		//if (player->IsInCombat() != isInCombat) {
+		//	isInCombat = player->IsInCombat();
+		//	change = true;
+		//} 
+		
+
+		if (player->actorState.IsWeaponDrawn() != isWeaponDrawn) {
+			isWeaponDrawn = !!player->actorState.IsWeaponDrawn();
+			change = true;
+		}
+
+		bool sneak = (player->actorState.flags08 & ActorState::kState_Sneaking) != 0;
+		if (sneak != isSneaking) {
+			isSneaking = sneak;
+			change = true;
+		}
+
+		if (change) {
+			SendStateChange();
+		}
+	}
+};
+
+GameStateController* gameStateController = NULL;
+
+static void __cdecl Hook_PostLoad() {
+	TRACE_METHOD();
+
+	if (gameStateController == NULL) {
+		gameStateController = new GameStateController();
+	}
+
+	if (g_SkyrimType == VR) {	
 		FavoritesMenuManager::getInstance()->RefreshAll();
 	}
 }
 
 
+
 class RunCommandSink : public BSTEventSink<InputEvent> {
-	EventResult ReceiveEvent(InputEvent ** evnArr, InputEventDispatcher * dispatcher) override {
+	EventResult ReceiveEvent(InputEvent** evnArr, InputEventDispatcher* dispatcher) override {
+		// Unadvised, called every frame
+		//TRACE_METHOD();
 		g_GameThreadTaskQueue.PumpThreadActions();
+		if (gameStateController) {
+			gameStateController->UpdatePlayerState();
+		}
 		return kEvent_Continue;
 	}
 };
 
-// Called every frame?
+
+// Called whilst the game is not paused
 static void __cdecl Hook_Loop()
 {
+	// Unadvised, called every frame
+	//TRACE_METHOD();
+
 	if (dialogueMenu != NULL)
 	{
 		// Menu exiting, avoid NPE
@@ -124,6 +262,9 @@ static void __cdecl Hook_Loop()
 	{
 		if (g_SkyrimType == VR) {
 			g_GameThreadTaskQueue.PumpThreadActions();
+			if (gameStateController) {
+				gameStateController->UpdatePlayerState();
+			}
 		} else {
 			// The latest version of SkyrimSE will not enter the loop if no menu is displayed.
 			// So we use InputEventSink to get a continuous running loop.
@@ -139,6 +280,7 @@ static void __cdecl Hook_Loop()
 			}
 		}
 	}
+	
 }
 
 static uintptr_t loopEnter = 0x0;
@@ -197,8 +339,8 @@ void Hooks_Inject(void)
 	loopCallTarget = kHook_Loop_Call_Target;
 	loopEnter = kHook_Loop_Enter;
 
-	Log::address("Loop Enter: ", kHook_Loop_Enter);
-	Log::address("Loop Target: ", kHook_Loop_Call_Target);
+	Log::info("Loop Enter: %p", kHook_Loop_Enter);
+	Log::info("Loop Target: %p", kHook_Loop_Call_Target);
 
 	/***
 	Post Load HOOK - VR Only
@@ -209,8 +351,8 @@ void Hooks_Inject(void)
 		loadEventEnter = kHook_LoadEvent_Enter;
 		loadEventTarget = kHook_LoadEvent_Target;
 
-		Log::address("LoadEvent Enter: ", kHook_LoadEvent_Enter);
-		Log::address("LoadEvent Target: ", kHook_LoadEvent_Target);
+		Log::info("LoadEvent Enter: %p", kHook_LoadEvent_Enter);
+		Log::info("LoadEvent Target: %p", kHook_LoadEvent_Target);
 
 		struct Hook_LoadEvent_Code : Xbyak::CodeGenerator {
 			Hook_LoadEvent_Code(void * buf) : Xbyak::CodeGenerator(4096, buf)

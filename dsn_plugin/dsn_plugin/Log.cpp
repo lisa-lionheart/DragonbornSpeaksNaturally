@@ -1,25 +1,36 @@
 #include "Log.h"
 #include <sstream>
 #include <time.h>
+#include <stdarg.h>
+#include <shlobj_core.h> 
 
 static int THRESHOLD = 0;
 
-Log::Log() :
-	log_file("dragonborn_speaks.log", std::ios_base::out | std::ios_base::app)
-{
+// Maximum message length
+static const int MAX_MESSAGE = 2048;
 
-}
+using namespace std;
 
-Log::~Log()
+Log::Log() 
 {
+	string name = "DragonbornSpeaksNaturallyPlugin.log";
+
+	char myDocuments[MAX_PATH];
+	if (SHGetFolderPathA(NULL, CSIDL_MYDOCUMENTS, NULL, 0, myDocuments) != S_OK) {
+		ASSERT("Could not get My Documetns folder", false);
+		return;
+	}	
+	string fileName = string(myDocuments) + "\\DragonbornSpeaksNaturally\\" + name;
+	log_file = ofstream(fileName, ios_base::out |ios_base::app);
 }
 
 Log* Log::instance = NULL;
 
 const char* LEVEL_NAMES[] = {
+	"TARCE",
 	"DEBUG",
-	"INFO",
-	"WARN",
+	" INFO",
+	" WARN",
 	"ERROR"
 };
 
@@ -30,43 +41,62 @@ Log* Log::get() {
 	return instance;
 }
 
-void Log::write(int level, std::string message) {
-	if (level >= THRESHOLD) {
+void Log::write(int level, const char* message, va_list& args) {
+	
 		time_t rawtime;
 		time(&rawtime);
 		tm* t = localtime(&rawtime);
 
-		char buffer[2048];
-		sprintf_s(buffer, "%02d:%02d:%02d %s: %s", t->tm_hour, t->tm_min, t->tm_sec, LEVEL_NAMES[level], message.c_str());
+		char buffer[MAX_MESSAGE];
+		// Print the time and the log level
+		int timeLen = snprintf(&buffer[0], MAX_MESSAGE, "%02d:%02d:%02d %s: ", t->tm_hour, t->tm_min, t->tm_sec, LEVEL_NAMES[level]);
+
+		// Print the message formatted
+		vsnprintf_s(&buffer[timeLen], MAX_MESSAGE - timeLen, MAX_MESSAGE - timeLen, message, args);
 
 		log_file << buffer << std::endl;
 		log_file.flush();
+}
+
+
+void Log::trace(const char* message, ...) {
+	if (0 >= THRESHOLD) {
+		va_list args;
+		va_start(args, message);
+		Log::get()->write(0, message, args);
+		va_end(args);
 	}
 }
 
-void Log::debug(std::string message) {
-	Log::get()->write(0, message);
+void Log::debug(const char* message, ...) {
+	if (1 >= THRESHOLD) {
+		va_list args;
+		va_start(args, message);
+		Log::get()->write(1, message, args);
+		va_end(args);
+	}
 }
-void Log::info(std::string message) {
-	Log::get()->write(1, message);
+void Log::info(const char* message, ...) {
+	if (2 >= THRESHOLD) {
+		va_list args;
+		va_start(args, message);
+		Log::get()->write(3, message, args);
+		va_end(args);
+	}
 }
-void Log::warn(std::string message) {
-	Log::get()->write(2, message);
+void Log::warn(const char* message, ...) {
+	if (3 >= THRESHOLD) {
+		va_list args;
+		va_start(args, message);
+		Log::get()->write(4, message, args);
+		va_end(args);
+	}
 }
-void Log::error(std::string message) {
-	Log::get()->write(3, message);
-}
-
-void Log::address(std::string message, uintptr_t addr) {
-	std::stringstream ss;
-	ss << std::hex << addr;
-	const std::string s = ss.str();
-	Log::info(message.append(s));
-}
-
-void Log::hex(std::string message, uintptr_t addr) {
-	std::stringstream ss;
-	ss << std::hex << addr;
-	const std::string s = ss.str();
-	Log::info(message.append(s));
+void Log::error(const char* message, ...) {
+	if (4 >= THRESHOLD) {
+		va_list args;
+		va_start(args, message);
+		Log::get()->write(4, message, args);
+		va_end(args);
+	}
 }

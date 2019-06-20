@@ -21,7 +21,9 @@ class Utils
 {
 
 public:
-	static std::string fmt_hex(uint32_t val);
+	// Format integral values as hex
+	static std::string fmt_hex(UInt32 val);
+	static std::string fmt_hex(UInt64 val);
 
 	static std::string fmt_flags(uint32_t val);
 

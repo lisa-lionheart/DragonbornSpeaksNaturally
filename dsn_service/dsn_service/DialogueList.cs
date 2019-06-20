@@ -64,7 +64,7 @@ namespace DSN {
             return -1;
         }
 
-        public ICollection<Grammar> GetGrammars() {
+        public ICollection<Grammar> GetGrammars(GameState gameState) {
             return this.grammarToIndex.Keys;
         }
 

@@ -9,10 +9,6 @@
 #include "ConsoleCommandRunner.h"
 #include "SkyrimType.h"
 
-#define BUFSIZE 4096 
-
-
-
 
 static std::vector<std::string> split(const std::string &s, char delim) {
 	std::stringstream ss(s);
@@ -123,7 +119,7 @@ std::string SpeechRecognitionClient::ReadLine() {
 
 					// Remove \n
 					line.pop_back();
-					Log::debug("CLIENT << " + line);
+					Log::debug("CLIENT << %s", line.c_str());
 					return line;
 				}
 			}
@@ -135,7 +131,7 @@ std::string SpeechRecognitionClient::ReadLine() {
 
 void SpeechRecognitionClient::WriteLine(std::string line) {
 	DWORD dwWritten;
-	Log::debug("CLIENT >> " + line);
+	Log::debug("CLIENT >> %s", line.c_str());
 	line.push_back('\n');
 	WriteFile(this->hChildStd_IN_Wr, line.c_str(), line.length(), &dwWritten, NULL);
 }
@@ -159,8 +155,7 @@ void SpeechRecognitionClient::Start() {
 		.append(" --encoding UTF-8"); // Let the service set encoding of its stdin/stdout to UTF-8.
 									// This can avoid non-ASCII characters (such as Chinese characters) garbled.
 
-	Log::info("Starting speech recognition service at ");
-	Log::info(exePath);
+	Log::info("Starting speech recognition service at %s", exePath.c_str());
 
 	LPSTR szCmdline = const_cast<char*>(exePath.c_str());
 	PROCESS_INFORMATION piProcInfo;
@@ -194,10 +189,8 @@ void SpeechRecognitionClient::Start() {
 
 	if (bSuccess)
 	{
-		Log::info("Initialized speech recognition service");	
-
+		Log::info("Initialized speech recognition service");
 		CreateThread(NULL, 0, &SpeechRecognitionClient::ThreadStart, this, 0L, NULL);
-		Log::info("Detaacged");
 	}
 	else
 	{

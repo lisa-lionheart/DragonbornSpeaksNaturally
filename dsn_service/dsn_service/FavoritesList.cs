@@ -242,7 +242,7 @@ namespace DSN {
             return null;
         }
 
-        public ICollection<Grammar> GetGrammars() {
+        public ICollection<Grammar> GetGrammars(GameState gameState) {
             return commandsByGrammar.Keys;
         }
     }

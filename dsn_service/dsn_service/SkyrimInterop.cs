@@ -9,6 +9,21 @@ using System.Threading;
 using System.Threading.Tasks;
 
 namespace DSN {
+
+
+    struct GameState {
+
+        
+        public string currentMenu;
+
+        public bool isInCombat;
+        public bool isWeaponDrawn;
+        public bool isSneaking;
+
+        public bool isMenuOpen() {
+            return currentMenu != "None";
+        }
+    }
     class SkyrimInterop {
 
         private Configuration config = null;
@@ -25,9 +40,11 @@ namespace DSN {
         private BlockingCollection<string> commandQueue;
         private ShoutsKnowledge shoutsKnowledge;
 
+        
         public SkyrimInterop(Configuration config, ConsoleInput consoleInput) {
             this.config = config;
             this.consoleInput = consoleInput;
+
         }
 
         public void Start() {
@@ -127,6 +144,15 @@ namespace DSN {
                         spellBook.UpdateSpells(tokens.Skip(1));
                     } else if(command.Equals("SHOUTS")) {
                         shoutsKnowledge.UpdateShouts(tokens.Skip(1));
+                    } else if(command.Equals("GAMESTATE"))
+                    {
+                        GameState newState;
+                        newState.currentMenu = tokens[1];
+                        newState.isInCombat = tokens[2].Equals("1");
+                        newState.isWeaponDrawn = tokens[3].Equals("1");
+                        newState.isSneaking = tokens[4].Equals("1");
+
+                        recognizer.SetGameState(newState);
                     }
 
 

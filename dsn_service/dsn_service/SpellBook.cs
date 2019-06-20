@@ -49,9 +49,17 @@ namespace DSN
             this.activatePhrase = config.Get("SpellBook", "activatePhrasePrefix", "activate");
         }
 
-        public ICollection<Grammar> GetGrammars()
+        public ICollection<Grammar> GetGrammars(GameState gameState)
         {
-            return grammars.Keys;            
+            // Only allow casting and equipping when weapon is drawn
+            if (!gameState.isMenuOpen() && gameState.isWeaponDrawn)
+            {
+                return grammars.Keys;
+            }
+            else
+            {
+                return new List<Grammar>();
+            }
         }
 
         internal string GetCommandForResult(RecognitionResult result)

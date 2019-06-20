@@ -26,11 +26,9 @@ void TaskQueue::ExecuteAction(const std::function<void(void)>& func, bool wait) 
 	lock.unlock();
 
 	if (wait) {
-		Log::debug("Blocking on task");
 		while (!task->done) {
 			Sleep(1);
 		}
-		Log::debug("Finished Blocking on task");
 		delete task;
 	}
 }
@@ -51,7 +49,7 @@ void TaskQueue::PumpThreadActions() {
 			return;
 		}
 
-		Log::debug("Executing game thread task " + Utils::fmt_hex((uint32_t)task));
+		Log::debug("Executing game thread task %p", task);
 
 		task->func();
 		task->done = true;

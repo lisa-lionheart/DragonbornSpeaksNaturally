@@ -7,6 +7,6 @@ using System.Threading.Tasks;
 
 namespace DSN {
     interface ISpeechRecognitionGrammarProvider {
-        ICollection<Grammar> GetGrammars();
+        ICollection<Grammar> GetGrammars(GameState state);
     }
 }

@@ -9,7 +9,8 @@ namespace DSN
     {
         private Configuration config;
 
-        private Dictionary<Grammar, string> grammars = new Dictionary<Grammar,string>();
+        private Dictionary<Grammar, string> activateGrammars = new Dictionary<Grammar,string>();
+        private Dictionary<Grammar, string> equipGrammars = new Dictionary<Grammar, string>();
 
         private string equipPrefix;
         private Boolean enabled;
@@ -25,9 +26,21 @@ namespace DSN
             this.equipPrefix = config.Get("Favorites", "equipPhrasePrefix", "equip");
         }
 
-        public ICollection<Grammar> GetGrammars()
+        public ICollection<Grammar> GetGrammars(GameState gameState)
         {
-            return grammars.Keys;
+            List<Grammar> result = new List<Grammar>(); 
+            if (!gameState.isMenuOpen())
+            {
+                // Only permit activation when weapon is out and not sneaking
+                if(gameState.isWeaponDrawn && !gameState.isSneaking)
+                {
+                    result.AddRange(activateGrammars.Keys);
+                }
+
+                // Always allow equip (when not looking at the menu)
+                result.AddRange(equipGrammars.Keys);                
+            }
+            return result;
         }
 
         internal void UpdateShouts(IEnumerable<string> enumerable)
@@ -36,9 +49,10 @@ namespace DSN
                 return;
             }
 
-            grammars.Clear();
+            equipGrammars.Clear();
+            activateGrammars.Clear();
 
-            foreach(string token in enumerable)
+            foreach (string token in enumerable)
             {
                 Trace.TraceInformation("Parsing shout " + token);
 
@@ -73,7 +87,7 @@ namespace DSN
                     }
                 }
             }
-            Trace.TraceInformation("Shouts updated, " + grammars.Count + " grammers");
+            Trace.TraceInformation("Shouts updated, " + (equipGrammars.Count+activateGrammars.Count) + " grammers");
         }
 
         string GetWord(string[] tokens, int i)
@@ -89,13 +103,16 @@ namespace DSN
             gb.Append("select " + name);
 
             string command = "COMMAND|player.equipshout " + id;
-            grammars.Add(new Grammar(gb), command);
+            equipGrammars.Add(new Grammar(gb), command);
         }
 
         internal string GetCommandForResult(RecognitionResult result)
         {
             string command = null;
-            grammars.TryGetValue(result.Grammar, out command);
+            if (!equipGrammars.TryGetValue(result.Grammar, out command))
+            {
+                activateGrammars.TryGetValue(result.Grammar, out command);
+            }
             return command;
         }
 
@@ -108,7 +125,7 @@ namespace DSN
             // Attempt to vary the length of the key press to do the full shout maybe
             string command = "player.equipshout " + id + "; sleep 10; press z " + (power * 100);
             Trace.TraceInformation("Phrase '{0}' mapped to '{1}'", phrase, command);
-            grammars.Add(new Grammar(gb), "COMMAND|"+command);
+            activateGrammars.Add(new Grammar(gb), "COMMAND|"+command);
         }
     }
 }

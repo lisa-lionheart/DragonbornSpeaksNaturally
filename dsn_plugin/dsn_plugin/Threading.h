@@ -37,9 +37,12 @@ public:
 extern TaskQueue g_GameThreadTaskQueue;
 extern TaskQueue g_ClientThreadTaskQueue;
 
-#define OUR_ASSERT(cond) if(!cond) { Log::error("Assertion failed ("#cond") file: " + std::string(__FILE__) + " line: " + std::to_string(__LINE__)); }
-
 // Assertions to check that our code is executing in the right place
-#define ASSERT_IS_GAME_THREAD() OUR_ASSERT(g_GameThreadTaskQueue.isOwnerThread());
-#define ASSERT_IS_CLIENT_THREAD() OUR_ASSERT(g_ClientThreadTaskQueue.isOwnerThread());
-
+#ifdef _DEBUG
+#define SOFT_ASSERT(cond) Log::error("Asertion failed at %s:%d", __FILE__, __LINE__)
+#define ASSERT_IS_GAME_THREAD() SOFT_ASSERT(g_GameThreadTaskQueue.isOwnerThread());
+#define ASSERT_IS_CLIENT_THREAD() SOFT_ASSERT(g_ClientThreadTaskQueue.isOwnerThread());
+#else
+#define ASSERT_IS_GAME_THREAD()
+#define ASSERT_IS_CLIENT_THREAD()
+#endif

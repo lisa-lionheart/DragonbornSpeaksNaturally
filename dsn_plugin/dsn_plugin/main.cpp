@@ -37,7 +37,7 @@ extern "C"	{
 			// Initialize once for each new process.
 			// Return FALSE to fail DLL load.
 			Log::info("DragonBornNaturallySpeaking loaded");
-			Log::info(std::string("Version ").append(VERSION));
+			Log::info("Version %s", VERSION);
 			g_moduleHandle = (void *)hinstDLL;
 			g_branchTrampoline.Create(1024 * 64);
 			g_localTrampoline.Create(1024 * 64, g_moduleHandle);

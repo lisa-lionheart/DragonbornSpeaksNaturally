@@ -8,11 +8,18 @@
 
 const char* formTypeNames[];
 
-std::string Utils::fmt_hex(uint32_t formID) {
-	char buffer[10];
-	sprintf_s(buffer, "%08X", formID);
+std::string Utils::fmt_hex(UInt32 val) {
+	char buffer[9];
+	sprintf_s(buffer, "%08X", val);
 	return buffer;
 }
+
+std::string Utils::fmt_hex(UInt64 val) {
+	char buffer[17];
+	sprintf_s(buffer, "%016I64X", val);
+	return buffer;
+}
+
 
 std::string Utils::fmt_flags(uint32_t n) {
 	std::string r;

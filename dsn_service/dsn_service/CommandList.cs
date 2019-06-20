@@ -38,7 +38,7 @@ namespace DSN {
             }
         }
 
-        public ICollection<Grammar> GetGrammars() {
+        public ICollection<Grammar> GetGrammars(GameState gameState) {
             return commandsByPhrase.Keys;
         }
     }

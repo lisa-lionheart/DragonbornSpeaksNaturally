@@ -114,6 +114,7 @@ std::vector<FavoriteMenuItem> ExtractFavorites(InventoryEntryData * inv) {
 }
 
 void FavoritesMenuManager::RefreshAll() {
+	TRACE_METHOD();
 	ASSERT_IS_GAME_THREAD();
 
 	PlayerCharacter* player = (*g_thePlayer);
@@ -131,6 +132,7 @@ void FavoritesMenuManager::RefreshAll() {
 }
 
 void FavoritesMenuManager::RefreshSpellBook(PlayerCharacter* player) {
+	TRACE_METHOD();
 
 	PlayerCharacter::SpellArray& spells = player->addedSpells;
 
@@ -153,7 +155,7 @@ void FavoritesMenuManager::RefreshSpellBook(PlayerCharacter* player) {
 		}
 
 		if (typeString != NULL) {
-			Log::debug("Adding: " + std::string(spell->fullName.name.data) + " type: " + typeString + " flags: " + Utils::fmt_flags(spell->data.unk00.flags));
+			Log::debug("Adding: %s type: %s flags: %s", spell->fullName.name.data, typeString, Utils::fmt_flags(spell->data.unk00.flags).c_str());
 			command += Utils::fmt_hex(spell->formID) + "," + typeString;
 			command += "," + std::string(spell->fullName.GetName());
 			switch (spell->data.castType)
@@ -169,12 +171,11 @@ void FavoritesMenuManager::RefreshSpellBook(PlayerCharacter* player) {
 			}
 			command += "|";
 		} else {
-			Log::debug("Ignoring: " + std::string(spell->fullName.GetName()));
+			Log::debug("Ignoring: %s", spell->fullName.GetName());
 		}
 	}
 
 	if (lastSpellBookCommand != command) {
-		Log::info(command);
 		SpeechRecognitionClient::getInstance()->WriteLine(command);
 		lastSpellBookCommand = command;
 	}	
@@ -185,16 +186,15 @@ void FavoritesMenuManager::RefreshSpellBook(PlayerCharacter* player) {
 * Format SHOUTS|<formid>,<name>,<WOOP1>,[<WOOP2>,[<WOOP3>]]|....
 */
 void FavoritesMenuManager::RefreshShouts(TESSpellList& spellList) {
-
-	Log::info("Refreshing player shouts");
-
+	TRACE_METHOD();
+	
 	std::string command = "SHOUTS|";
 
 	for (UInt32 i = 0; i < spellList.GetShoutCount(); i++) {
 		TESShout* shout = spellList.GetNthShout(i);
 		std::string name(shout->fullName.name.data);
 
-		Log::debug("Adding shout: " + name);
+		Log::debug("Adding shout: %s", name.c_str());
 		command += Utils::fmt_hex(shout->formID) + "," + name;
 
 		for (int j = 0; j < TESShout::Words::kNumWords; j++) {
@@ -208,13 +208,13 @@ void FavoritesMenuManager::RefreshShouts(TESSpellList& spellList) {
 	}
 
 	if (lastShoutsCommand != command) {
-		Log::info(command);
 		SpeechRecognitionClient::getInstance()->WriteLine(command);
 		lastShoutsCommand = command;
 	}
 }
 
 void FavoritesMenuManager::RefreshFavorites(PlayerCharacter* player) {
+	TRACE_METHOD();
 
 		// Clear current favorites
 		favorites.clear();

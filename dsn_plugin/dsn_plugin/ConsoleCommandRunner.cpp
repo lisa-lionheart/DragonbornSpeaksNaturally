@@ -66,7 +66,7 @@ void ConsoleCommandRunner::RunVanillaCommand(std::string command) {
 	}
 
 	if (consoleMenu != NULL) {
-		Log::debug("Invoking command:" + command);
+		Log::debug("Invoking command: %s", command.c_str());
 
 		GFxValue methodName;
 		methodName.type = GFxValue::kType_String;
@@ -261,14 +261,14 @@ void ConsoleCommandRunner::CustomCommandSwitchWindow(std::vector<std::string> pa
 		SwitchToThisWindow(window, true);
 	}
 	else {
-		Log::info("Cannot find windows with title/executable: " + windowTitle);
+		Log::info("Cannot find windows with title/executable: %s", windowTitle.c_str());
 	}
 }
 // trycast <spellid> <slot>
 void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params) {
 
 	if (params.size() != 3) {
-		Log::error("trycast: Expecting 2 parameters got " + std::to_string(params.size()));
+		Log::error("trycast: Expecting 2 parameters got %d", params.size());
 		return;
 	}
 
@@ -285,27 +285,27 @@ void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params)
 		return;
 	}
 	else {
-		Log::info("Spell is " + Utils::inspect(spell));
+		Log::info("Spell is %s", Utils::inspect(spell).c_str());
 	}
 
 	std::string slotName = params[2];
 	SInt32 slotId = Utils::getSlot(slotName);
 	if (slotId == kSlotId_Null) {
-		Log::error("trycast: Invalid slot '" + slotName + "'");
+		Log::error("trycast: Invalid slot '%'", slotName.c_str());
 		return;
 	}
 
 	// The item previously inhabiting the slot
 	TESForm* saveSlotItem = Utils::getEquippedSlot(player, slotId);
 
-	Log::info("Current item in slot " + slotName + " is " + Utils::inspect(saveSlotItem));
+	Log::info("Current item in slot %s is %s ", slotName.c_str(), Utils::inspect(saveSlotItem).c_str());
 
 	// TODO: Disable animation
 	RunCommand("player.equipspell " + Utils::fmt_hex(spell->formID) + " " + slotName);
 
 	Sleep(50); // Give time to switch spell
 
-	Log::info("Spell cast time=" + std::to_string(spell->data.castTime));
+	Log::info("Spell cast time=%d", spell->data.castTime);
 
 	// Extra time since even insta-cast spells need a second or two to work
 	const int CAST_TIME_MODIFIER = 2000;
@@ -326,7 +326,7 @@ void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params)
 	Sleep(1000);
 
 	if (saveSlotItem != NULL) {
-		Log::debug("Restoring old state: " + Utils::inspect(saveSlotItem));
+		Log::debug("Restoring old state: %s", Utils::inspect(saveSlotItem).c_str());
 		switch (saveSlotItem->formType) {
 		case FormType::kFormType_Spell:
 			RunCommand("player.equipspell " + Utils::fmt_hex(saveSlotItem->formID) + " " + slotName);
@@ -339,7 +339,7 @@ void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params)
 			g_GameThreadTaskQueue.ExecuteAction(std::bind(papyrusActor::EquipItemEx, player, saveSlotItem, slotId, false, false), true);
 			break;
 		default:
-			Log::error("trycast: Don't know how to restore previous state: " + Utils::inspect(saveSlotItem));
+			Log::error("trycast: Don't know how to restore previous state: %s", Utils::inspect(saveSlotItem).c_str());
 		}
 	}
 	else {
@@ -361,14 +361,14 @@ void ConsoleCommandRunner::CustomCommandPushEquip(std::vector<std::string> param
 	std::string slotName = params[1];
 	SInt32 slotId = Utils::getSlot(slotName);
 	if (slotId == kSlotId_Null) {
-		Log::error("pushequip: Invalid slot '" + slotName + "'");
+		Log::error("pushequip: Invalid slot '%s'", slotName.c_str());
 		return;
 	}
 
 	// The item previously inhabiting the slot
 	TESForm* saveSlotItem = Utils::getEquippedSlot(player, slotId);
 
-	Log::info("Current item in slot " + slotName + " is " + Utils::inspect(saveSlotItem));
+	Log::info("Current item in slot %s is %s", slotName.c_str(), Utils::inspect(saveSlotItem).c_str());
 
 	equipStack.push(saveSlotItem);
 }
@@ -384,19 +384,19 @@ void ConsoleCommandRunner::CustomCommandPopEquip(std::vector<std::string> params
 	std::string slotName = params[1];
 	SInt32 slotId = Utils::getSlot(slotName);
 	if (slotId == kSlotId_Null) {
-		Log::error("popequip: Invalid slot '" + slotName + "'");
+		Log::error("popequip: Invalid slot '%s'", slotName.c_str());
 		return;
 	}
 
 	if (equipStack.size() == 0) {
-		Log::error("popequip: Nothing pushed onto stack ");
+		Log::error("popequip: Nothing pushed onto stack!");
 		return;
 	}
 
 	TESForm* popped = equipStack.top();
 	equipStack.pop();
 
-	Log::debug("popequip: Popped from stack " + Utils::inspect(popped) + " into " + slotName);
+	Log::debug("popequip: Popped from stack %s into %s", Utils::inspect(popped).c_str(), slotName.c_str());
 	switch (popped->formType) {
 	case FormType::kFormType_Spell:
 		RunCommand("player.equipspell " + Utils::fmt_hex(popped->formID) + " " + slotName);
@@ -409,6 +409,6 @@ void ConsoleCommandRunner::CustomCommandPopEquip(std::vector<std::string> params
 		g_GameThreadTaskQueue.ExecuteAction(std::bind(papyrusActor::EquipItemEx, player, popped, slotId, false, false), true);
 		break;
 	default:
-		Log::error("popequip: Don't know how to restore previous state: " + Utils::inspect(popped));
+		Log::error("popequip: Don't know how to restore previous state: %s", Utils::inspect(popped).c_str());
 	}
 }

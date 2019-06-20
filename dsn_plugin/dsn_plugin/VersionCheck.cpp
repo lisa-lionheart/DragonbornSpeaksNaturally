@@ -162,7 +162,7 @@ bool VersionCheck::IsCompatibleExeVersion() {
 		#endif
 	}
 	else {
-		Log::info("Unsupported process: " + procName);
+		Log::info("Unsupported process: %s", procName.c_str());
 		return false;
 	}
 
@@ -178,24 +178,24 @@ bool VersionCheck::IsCompatibleExeVersion() {
 	if (version == SKYRIM_VERSION[VR_BETA])
 		g_SkyrimType = VR_BETA;
 
-	Log::info("Process name: " + procName);
+	Log::info("Process name: %s", procName.c_str());
 
 	const UInt64 kSkyrimCurVersion = SKYRIM_VERSION[g_SkyrimType];
 
 	if (version < kSkyrimCurVersion) {
-		Log::info("Error: Skyrim version is out of date, please ensure you're using version " + SKYRIM_VERSION_STR[g_SkyrimType]);
-		Log::hex("Skyrim Version: ", version);
+		Log::info("Error: Skyrim version is out of date, please ensure you're using version %s", SKYRIM_VERSION_STR[g_SkyrimType].c_str());
+		Log::info("Skyrim Version: %08X", version);
 		return false;
 	}
 	else if (version > kSkyrimCurVersion) {
 		Log::info("This version of Skyrim is newer than the version supported by DSN");
 		Log::info("Please install the latest version of DSN once it's available");
-		Log::hex("Skyrim Version: ", version);
+		Log::info("Skyrim Version: %08X", version);
 		return false;
 	}
 
 	Log::info("Skyrim compatibility check passed");
-	Log::hex("Skyrim version: ", version);
+	Log::info("Skyrim version: %08X", version);
 
 	return true;
 }

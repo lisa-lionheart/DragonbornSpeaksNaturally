@@ -26,6 +26,8 @@ namespace DSN {
         private Thread waitingDeviceThread;
         private Configuration config;
 
+        private GameState gameState;
+
         public SpeechRecognitionManager(Configuration config) {
             this.config = config;
 
@@ -42,6 +44,8 @@ namespace DSN {
             this.DSN.AudioSignalProblemOccurred += DSN_AudioSignalProblemOccurred;
             this.DSN.SpeechRecognized += DSN_SpeechRecognized;
             this.DSN.SpeechRecognitionRejected += DSN_SpeechRecognitionRejected;
+
+            gameState.currentMenu = "None";
 
             WaitRecordingDeviceNonBlocking();
         }
@@ -119,6 +123,11 @@ namespace DSN {
             }
         }
 
+        internal void SetGameState(GameState newState)
+        {
+            gameState = newState;
+        }
+
         public void StartSpeechRecognition(bool isDialogueMode, params ISpeechRecognitionGrammarProvider[] grammarProviders) {
             try {
                 this.isDialogueMode = isDialogueMode;
@@ -133,10 +142,17 @@ namespace DSN {
 
                 lock (DSN) {
                     StopRecognition(); // Cancel previous recognition
+                    List<Grammar> allGrammars = new List<Grammar>();
+                    try
+                    {
+                         allGrammars = grammarProviders.SelectMany((x) => x.GetGrammars(gameState)).ToList();
+                    } catch(Exception e) {
+                        Trace.TraceError("Execption thrown {0} when genrating grammars", e);
+                    }
 
-                    List<Grammar> allGrammars = grammarProviders.SelectMany((x) => x.GetGrammars()).ToList();
                     // Error is thrown if no grammars are loaded
                     if (allGrammars.Count > 0) {
+                        Trace.TraceInformation("Loaded grammars {0}", allGrammars.Count());
                         SetGrammar(allGrammars);
                         this.DSN.RecognizeAsync(RecognizeMode.Multiple);
                         // Thread-safe: recognitionStatus = STATUS_RECOGNIZING
