@@ -3,15 +3,16 @@
 #include "Log.h"
 #include <io.h>
 #include <fcntl.h>
+#include <Threading.h>
+
+#include "FavoritesMenuManager.h"
+#include "ConsoleCommandRunner.h"
+#include "SkyrimType.h"
 
 #define BUFSIZE 4096 
 
-HANDLE g_hChildStd_IN_Rd = NULL;
-HANDLE g_hChildStd_IN_Wr = NULL;
-HANDLE g_hChildStd_OUT_Rd = NULL;
-HANDLE g_hChildStd_OUT_Wr = NULL;
 
-DWORD g_ClientThread = NULL;
+
 
 static std::vector<std::string> split(const std::string &s, char delim) {
 	std::stringstream ss(s);
@@ -61,58 +62,12 @@ int SpeechRecognitionClient::ReadSelectedIndex() {
 	return t;
 }
 
-std::string SpeechRecognitionClient::PopCommand() {
-	if (queuedCommands.empty())
-	{
-		return "";
-	}
-	else
-	{
-		queueLock.lock();
-		std::string retcommand = queuedCommands.front();
-		queuedCommands.pop();
-		queueLock.unlock();
-
-		return retcommand;
-	}
-}
-
-std::string SpeechRecognitionClient::PopEquip() {
-	if (queuedEquips.empty())
-	{
-		return "";
-	}
-	else
-	{
-		queueLock.lock();
-		std::string retcommand = queuedEquips.front();
-		queuedEquips.pop();
-		queueLock.unlock();
-
-		return retcommand;
-	}
-}
-
-void SpeechRecognitionClient::EnqueueCommand(std::string command) {
-	// The custom command will be executed on the current thread,
-	// and the Skyrim command will be executed in the game thread.
-	if (ConsoleCommandRunner::TryRunCustomCommand(command)) {
-		return;
-	}
-	queueLock.lock();
-	queuedCommands.push(command);
-	queueLock.unlock();
-}
-
-void SpeechRecognitionClient::EnqueueEquip(std::string equip) {
-	queueLock.lock();
-	queuedEquips.push(equip);
-	queueLock.unlock();
-}
-
-void SpeechRecognitionClient::AwaitResponses() {
-
+DWORD SpeechRecognitionClient::ClientLoop() {
+	Log::info("SpeechRecognitionClient thread started");
 	for (;;) {
+
+		g_ClientThreadTaskQueue.PumpThreadActions();
+
 		std::string inLine = ReadLine();
 		std::vector<std::string> tokens = split(inLine, '|');
 		std::string responseType = tokens[0];
@@ -125,13 +80,21 @@ void SpeechRecognitionClient::AwaitResponses() {
 		}
 		else if (responseType == "COMMAND") {
 			std::vector<std::string> commands = split(tokens[1], ';');
-			for(int i = 0; i < commands.size(); i++)
-				this->EnqueueCommand(commands[i]);
+			for (int i = 0; i < commands.size(); i++) {
+				ConsoleCommandRunner::RunCommand(commands[i]);
+			}
 		}
 		else if (responseType == "EQUIP") {
-			this->EnqueueEquip(tokens[1]);
+
+			// Not sure why this only in VR
+			if (g_SkyrimType == VR) {
+
+				g_GameThreadTaskQueue.ExecuteAction(std::bind(&FavoritesMenuManager::ProcessEquipCommand, FavoritesMenuManager::getInstance(), tokens[1]), false);
+			}
 		}
 	}
+
+	return 0;
 }
 
 std::string SpeechRecognitionClient::ReadLine() {
@@ -140,7 +103,10 @@ std::string SpeechRecognitionClient::ReadLine() {
 
 	std::string line(workingLine);
 	for (;;) {
-		BOOL bSuccess = ReadFile(this->stdOutRd, buffer, 4096, &dwRead, NULL);
+
+		g_ClientThreadTaskQueue.PumpThreadActions();
+
+		BOOL bSuccess = ReadFile(this->hChildStd_OUT_Rd, buffer, 4096, &dwRead, NULL);
 		if (bSuccess && dwRead > 0)
 		{
 			std::string chunk = std::string(buffer, dwRead);
@@ -162,7 +128,6 @@ std::string SpeechRecognitionClient::ReadLine() {
 				}
 			}
 		}
-		Sleep(200);
 	}
 
 	return "";
@@ -172,13 +137,10 @@ void SpeechRecognitionClient::WriteLine(std::string line) {
 	DWORD dwWritten;
 	Log::debug("CLIENT >> " + line);
 	line.push_back('\n');
-	WriteFile(this->stdInWr, line.c_str(), line.length(), &dwWritten, NULL);
+	WriteFile(this->hChildStd_IN_Wr, line.c_str(), line.length(), &dwWritten, NULL);
 }
 
-static DWORD WINAPI SpeechRecognitionClientThreadStart(void* ctx) {
-
-	g_ClientThread = GetCurrentThreadId();
-
+void SpeechRecognitionClient::Start() {
 	extern std::string g_dllPath;
 
 	// Startup speech recognition service
@@ -187,20 +149,20 @@ static DWORD WINAPI SpeechRecognitionClientThreadStart(void* ctx) {
 	saAttr.bInheritHandle = TRUE;
 	saAttr.lpSecurityDescriptor = NULL;
 
-	CreatePipe(&g_hChildStd_OUT_Rd, &g_hChildStd_OUT_Wr, &saAttr, 0);
-	SetHandleInformation(g_hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0);
-	CreatePipe(&g_hChildStd_IN_Rd, &g_hChildStd_IN_Wr, &saAttr, 0);
-	SetHandleInformation(g_hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0);
+	CreatePipe(&hChildStd_OUT_Rd, &hChildStd_OUT_Wr, &saAttr, 0);
+	SetHandleInformation(hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0);
+	CreatePipe(&hChildStd_IN_Rd, &hChildStd_IN_Wr, &saAttr, 0);
+	SetHandleInformation(hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0);
 
 	std::string exePath = g_dllPath.substr(0, g_dllPath.find_last_of("\\/"))
 		.append("\\DragonbornSpeaksNaturally.exe")
 		.append(" --encoding UTF-8"); // Let the service set encoding of its stdin/stdout to UTF-8.
-                                    // This can avoid non-ASCII characters (such as Chinese characters) garbled.
-	
+									// This can avoid non-ASCII characters (such as Chinese characters) garbled.
+
 	Log::info("Starting speech recognition service at ");
 	Log::info(exePath);
 
-	LPSTR szCmdline = const_cast<char *>(exePath.c_str());
+	LPSTR szCmdline = const_cast<char*>(exePath.c_str());
 	PROCESS_INFORMATION piProcInfo;
 	STARTUPINFO siStartInfo;
 	BOOL bSuccess = FALSE;
@@ -209,8 +171,8 @@ static DWORD WINAPI SpeechRecognitionClientThreadStart(void* ctx) {
 	ZeroMemory(&siStartInfo, sizeof(STARTUPINFO));
 	siStartInfo.cb = sizeof(STARTUPINFO);
 	//siStartInfo.hStdError = g_hChildStd_OUT_Wr;
-	siStartInfo.hStdOutput = g_hChildStd_OUT_Wr;
-	siStartInfo.hStdInput = g_hChildStd_IN_Rd;
+	siStartInfo.hStdOutput = hChildStd_OUT_Wr;
+	siStartInfo.hStdInput = hChildStd_IN_Rd;
 	siStartInfo.wShowWindow = SW_HIDE;
 	siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
 	siStartInfo.dwFlags |= STARTF_USESHOWWINDOW;
@@ -227,23 +189,18 @@ static DWORD WINAPI SpeechRecognitionClientThreadStart(void* ctx) {
 		&piProcInfo);  // receives PROCESS_INFORMATION 
 
 	CloseHandle(piProcInfo.hProcess);
-	CloseHandle(piProcInfo.hThread);
+	CloseHandle(piProcInfo.hThread);extern std::string g_dllPath;
+
 
 	if (bSuccess)
 	{
-		Log::info("Initialized speech recognition service");
-		SpeechRecognitionClient::getInstance()->SetHandles(g_hChildStd_IN_Wr, g_hChildStd_OUT_Rd);
-		SpeechRecognitionClient::getInstance()->AwaitResponses();
+		Log::info("Initialized speech recognition service");	
+
+		CreateThread(NULL, 0, &SpeechRecognitionClient::ThreadStart, this, 0L, NULL);
+		Log::info("Detaacged");
 	}
 	else
 	{
 		Log::info("Failed to initialize speech recognition service");
 	}
-
-	return 0;
-}
-
-
-void SpeechRecognitionClient::Initialize() {
-	CreateThread(NULL, 0, SpeechRecognitionClientThreadStart, NULL, 0L, NULL);
 }

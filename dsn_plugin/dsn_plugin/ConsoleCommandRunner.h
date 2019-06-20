@@ -8,25 +8,33 @@
 #include <unordered_map>
 #include <functional>
 #include <Windows.h>
+#include <stack>
+
+class TESForm;
 
 class ConsoleCommandRunner
 {
 private:
 	static const UInt32 kDefaultKeyPressTime = 50;
-
-	static std::unordered_map<std::string/* name */, std::function<void(std::vector<std::string>)>/* func */> customCmdList;
+	static std::stack<TESForm*> equipStack;
 
 public:
-	// Run a Skyrim console command
+
+	// Run either, will determine which of the further two messages
+	// should be called
+	//
+	// You should not call this from a game thread
 	static void RunCommand(std::string command);
 
-	// Register custom commands
-	static void RegisterCustomCommands();
+
+	// Run a Skyrim console command
+	static void RunVanillaCommand(std::string command);
+
 	// Try run a custom command.
-	// Returns true if the command was running successful.
+	// Returns true if the command was run successful.
 	// Returns false if the command is not a custom command and the caller
 	// should add the command to another queue.
-	static bool TryRunCustomCommand(const std::string &command);
+	static bool TryRunCustomCommand(const std::string& command);
 
 	//
 	// Add a new command:
@@ -151,12 +159,41 @@ public:
 
 
 
+
+	//
+	// Add new commands:
+	//         pushequip [left|right|voice]
+	//         popequip [left|right|voice]
+	//
+	// Description:
+	//         Records the current state of the contents of the specified slot
+	//         onto a stack (FILO) you can then pop it back after doing something else
+	//         With the players hands
+	// Example: Store and cast
+	//		   pushequip right
+	//         player.equipspell 4564575467 right
+	//         sleep 100
+	//         press leftmouse 2000
+	//         popequip right
+	// Example2: Swap hands
+	//         pushequip left
+	//         pushequip right
+	//         popequip left
+	//         popequip right
+	static void CustomCommandPushEquip(std::vector<std::string> params);
+	static void CustomCommandPopEquip(std::vector<std::string> params);
+
 	//
 	// Add a new command:
 	//         trycast [spellid] [left|right|voice]
 	//
 	// Description:
-	//         Check the player knows the spell, store current slot spell/item/shout, equip specified spell, cast
-	//         then return slot to previous state
+	//         Check the player knows the spell
+	//         Store current slot spell/item/shout
+	//         Equip specified spell, cast
+	//         Then return slot to previous state
+	// 
+	// Example:
+	//			trycast 00012FD0 right ; Shoot a firebolt from the right hand if the player is able
 	static void CustomCommandTryCast(std::vector<std::string> params);
 };

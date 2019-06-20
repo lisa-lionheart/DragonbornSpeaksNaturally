@@ -43,8 +43,7 @@ extern "C"	{
 			g_localTrampoline.Create(1024 * 64, g_moduleHandle);
 			Hooks_Inject();
 
-			SpeechRecognitionClient::Initialize();
-			ConsoleCommandRunner::RegisterCustomCommands();
+			SpeechRecognitionClient::getInstance()->Start();
 
 			break;
 

@@ -15,6 +15,9 @@
 #include <sstream>
 #include <fstream>
 
+
+#include "ConsoleCommandRunner.h";
+#include "Threading.h"
 #include "Utils.h"
 
 FavoritesMenuManager* FavoritesMenuManager::instance = NULL;
@@ -124,11 +127,6 @@ void FavoritesMenuManager::RefreshAll() {
 		} else {
 			RefreshShouts(actorBase->spellList);
 		}
-
-
-		Log::debug("Left hand slot: " + Utils::inspect(Utils::getEquippedSlot(player, kSlotId_Left)));
-		Log::debug("Right hand slot: " + Utils::inspect(Utils::getEquippedSlot(player, kSlotId_Right)));
-		Log::debug("Voice slot: " + Utils::inspect(Utils::getEquippedSlot(player, kSlotId_Voice)));
 	}
 }
 
@@ -316,14 +314,14 @@ EquipItem parseEquipItem(std::string command) {
 
 
 
-void FavoritesMenuManager::ProcessEquipCommands() {
+void FavoritesMenuManager::ProcessEquipCommand(std::string equipStr) {
 
 	ASSERT_IS_GAME_THREAD();
 
 	PlayerCharacter *player = (*g_thePlayer);
 	SpeechRecognitionClient *client = SpeechRecognitionClient::getInstance();
 	EquipManager *equipManager = EquipManager::GetSingleton();
-	std::string equipStr = client->PopEquip();
+	
 	if (player && equipManager && equipStr != "") {
 		EquipItem equipItem = parseEquipItem(equipStr);
 		TESForm * form = LookupFormByID(equipItem.TESFormId);
@@ -335,14 +333,14 @@ void FavoritesMenuManager::ProcessEquipCommands() {
 				break;
 			case 2: // Spell
 				if (equipItem.hand == 0) {
-					client->EnqueueCommand("player.equipspell " + Utils::fmt_hex(equipItem.itemId) + " left");
-					client->EnqueueCommand("player.equipspell " + Utils::fmt_hex(equipItem.itemId) + " right");
+					ConsoleCommandRunner::RunVanillaCommand("player.equipspell " + Utils::fmt_hex(equipItem.itemId) + " left");
+					ConsoleCommandRunner::RunVanillaCommand("player.equipspell " + Utils::fmt_hex(equipItem.itemId) + " right");
 				} else {
-					client->EnqueueCommand("player.equipspell " + Utils::fmt_hex(equipItem.itemId) + " " + hand);
+					ConsoleCommandRunner::RunVanillaCommand("player.equipspell " + Utils::fmt_hex(equipItem.itemId) + " " + hand);
 				}
 				break;
 			case 3: // Shout
-				client->EnqueueCommand("player.equipshout " + Utils::fmt_hex(equipItem.itemId));
+				ConsoleCommandRunner::RunVanillaCommand("player.equipshout " + Utils::fmt_hex(equipItem.itemId));
 				PlayerControls * controls = PlayerControls::GetSingleton();
 				break;
 			}

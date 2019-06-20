@@ -14,23 +14,51 @@
 #include "Hooks.h"
 #include <algorithm>
 #include <map>
+#include "Threading.h"
 
 static IMenu* consoleMenu = NULL;
 
-std::unordered_map<std::string/* name */, std::function<void(std::vector<std::string>)>/* func */> ConsoleCommandRunner::customCmdList;
+struct Command {
+	const char* name;
+	const std::function<void(std::vector<std::string>)> handler;
+};
+
+// Registered custom commands
+Command commands[] = {
+	{ "press" , ConsoleCommandRunner::CustomCommandPress },
+	{ "tapkey", ConsoleCommandRunner::CustomCommandTapKey },
+	{ "holdkey", ConsoleCommandRunner::CustomCommandHoldKey },
+	{ "releasekey", ConsoleCommandRunner::CustomCommandReleaseKey },
+	{ "sleep", ConsoleCommandRunner::CustomCommandSleep },
+	{ "switchwindow", ConsoleCommandRunner::CustomCommandSwitchWindow },
+	{ "trycast", ConsoleCommandRunner::CustomCommandTryCast },
+	{ "pushequip", ConsoleCommandRunner::CustomCommandPushEquip },
+	{ "popequip", ConsoleCommandRunner::CustomCommandPopEquip },
+	{  NULL, NULL }
+};
+
+std::stack<TESForm*> ConsoleCommandRunner::equipStack;
 
 void ConsoleCommandRunner::RunCommand(std::string command) {
 
-	// Bad things will happen if we try and do this from a background thread so pass it of
-	// and wait for it to be executed
-	if (!isGameThread()) {
-		// Don't know what thread this would be if not the client thread
-		ASSERT_IS_CLIENT_THREAD();
-		Log::debug("RunCommand: Calling to game thread for " + command);
-		executeOnGameThread(std::bind(ConsoleCommandRunner::RunCommand, command), true);
-		Log::debug("RunCommnad: Done with async");
-		return;
+	ASSERT_IS_CLIENT_THREAD();
+
+	// Run the custom command on the client thread because they do things
+	// like sleep and send window key presses and we dont want to lock up
+	// the game loop
+	// 
+	// How ever if it is a vanilla command we should run it on a game thread
+	// to prevent multi threading issue (in the hook_loop callback)
+	// we block the execution however to ensure a mixture of custom and vanilla
+	// comands are executed sequentually
+	if (!ConsoleCommandRunner::TryRunCustomCommand(command)) {
+		g_GameThreadTaskQueue.ExecuteAction(std::bind(&ConsoleCommandRunner::RunVanillaCommand, command), true);
 	}
+}
+
+void ConsoleCommandRunner::RunVanillaCommand(std::string command) {
+
+	ASSERT_IS_GAME_THREAD();
 
 	if (!consoleMenu) {
 		Log::info("Trying to create Console menu");
@@ -72,29 +100,21 @@ bool ConsoleCommandRunner::TryRunCustomCommand(const std::string & command) {
 		return false;
 	}
 	
-	std::string action = params[0];
-	stringToLower(action);
-
-	auto itr = customCmdList.find(action);
-	if (itr != customCmdList.end()) {
-		Log::debug("Custom command: " + command);
-		itr->second(params);
-		return true;
+	std::string action = params[0];	
+	for (int i = 0;; i++) {
+		if (commands[i].name == NULL) {
+			return false;
+		}
+		if (stricmp(commands[i].name, action.c_str()) == 0) {
+			commands[i].handler(params);
+			return true;
+		}
 	}
+
 
 	return false;
 }
 
-void ConsoleCommandRunner::RegisterCustomCommands() {
-	// Register custom commands
-	customCmdList["press"] = CustomCommandPress;
-	customCmdList["tapkey"] = CustomCommandTapKey;
-	customCmdList["holdkey"] = CustomCommandHoldKey;
-	customCmdList["releasekey"] = CustomCommandReleaseKey;
-	customCmdList["sleep"] = CustomCommandSleep;
-	customCmdList["switchwindow"] = CustomCommandSwitchWindow;
-	customCmdList["trycast"] = CustomCommandTryCast;
-}
 
 void ConsoleCommandRunner::CustomCommandPress(std::vector<std::string> params) {
 	std::vector<UInt32 /*key*/> keyDown;
@@ -294,13 +314,13 @@ void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params)
 	int castTime = (int)(spell->data.castTime * 1000) + CAST_TIME_MODIFIER;
 
 	if (slotId == kSlotId_Left) {
-		TryRunCustomCommand("press rightclick " + std::to_string(castTime));
+		RunCommand("press rightclick " + std::to_string(castTime));
 	}
 	else if (slotId == kSlotId_Right) {
-		TryRunCustomCommand("press leftclick " + std::to_string(castTime));
+		RunCommand("press leftclick " + std::to_string(castTime));
 	}
 	else if (slotId == kSlotId_Voice) {
-		TryRunCustomCommand("press z " + std::to_string(castTime));
+		RunCommand("press z " + std::to_string(castTime));
 	}
 
 	Sleep(1000);
@@ -316,7 +336,7 @@ void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params)
 			break;
 		case FormType::kFormType_Weapon:
 			// TODO: Get the right instance of the item rather than the first matching
-			executeOnGameThread(std::bind(papyrusActor::EquipItemEx, player, saveSlotItem, slotId, false, false), true);
+			g_GameThreadTaskQueue.ExecuteAction(std::bind(papyrusActor::EquipItemEx, player, saveSlotItem, slotId, false, false), true);
 			break;
 		default:
 			Log::error("trycast: Don't know how to restore previous state: " + Utils::inspect(saveSlotItem));
@@ -327,4 +347,68 @@ void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params)
 	}
 
 	Log::debug("trycast exits");
+}
+
+void ConsoleCommandRunner::CustomCommandPushEquip(std::vector<std::string> params) {
+
+
+	PlayerCharacter* player = *g_thePlayer.GetPtr();
+	if (!player) {
+		Log::error("pushequip: No player");
+		return;
+	}
+
+	std::string slotName = params[1];
+	SInt32 slotId = Utils::getSlot(slotName);
+	if (slotId == kSlotId_Null) {
+		Log::error("pushequip: Invalid slot '" + slotName + "'");
+		return;
+	}
+
+	// The item previously inhabiting the slot
+	TESForm* saveSlotItem = Utils::getEquippedSlot(player, slotId);
+
+	Log::info("Current item in slot " + slotName + " is " + Utils::inspect(saveSlotItem));
+
+	equipStack.push(saveSlotItem);
+}
+
+void ConsoleCommandRunner::CustomCommandPopEquip(std::vector<std::string> params) {
+
+	PlayerCharacter* player = *g_thePlayer.GetPtr();
+	if (!player) {
+		Log::error("popequip: No player");
+		return;
+	}
+
+	std::string slotName = params[1];
+	SInt32 slotId = Utils::getSlot(slotName);
+	if (slotId == kSlotId_Null) {
+		Log::error("popequip: Invalid slot '" + slotName + "'");
+		return;
+	}
+
+	if (equipStack.size() == 0) {
+		Log::error("popequip: Nothing pushed onto stack ");
+		return;
+	}
+
+	TESForm* popped = equipStack.top();
+	equipStack.pop();
+
+	Log::debug("popequip: Popped from stack " + Utils::inspect(popped) + " into " + slotName);
+	switch (popped->formType) {
+	case FormType::kFormType_Spell:
+		RunCommand("player.equipspell " + Utils::fmt_hex(popped->formID) + " " + slotName);
+		break;
+	case FormType::kFormType_Shout:
+		RunCommand("player.equipshout " + Utils::fmt_hex(popped->formID));
+		break;
+	case FormType::kFormType_Weapon:
+		// TODO: Get the right instance of the item rather than the first matching
+		g_GameThreadTaskQueue.ExecuteAction(std::bind(papyrusActor::EquipItemEx, player, popped, slotId, false, false), true);
+		break;
+	default:
+		Log::error("popequip: Don't know how to restore previous state: " + Utils::inspect(popped));
+	}
 }

@@ -1,19 +1,9 @@
 #pragma once
 #include <string>
-#include <Log.h>
 
 class TESForm;
-
-
-// The thread of the recogntion client
-extern DWORD g_ClientThread;
-
-bool isGameThread();
-
-#define OUR_ASSERT(cond) if(!cond) { Log::error("Assertion failed ("#cond") file: " + std::string(__FILE__) + " line: " + std::to_string(__LINE__)); }
-
-#define ASSERT_IS_GAME_THREAD() OUR_ASSERT(isGameThread());
-#define ASSERT_IS_CLIENT_THREAD() OUR_ASSERT(GetCurrentThreadId() == g_ClientThread);
+class Actor;
+class SpellItem;
 
 
 enum

@@ -38,11 +38,17 @@ public:
 
 	void RefreshAll();
 
-	void ProcessEquipCommands();
+	// Handle request from the service to equip an item
+	void ProcessEquipCommand(std::string equipStr);
 private:
 
+	// Scan the players favourited items and tell the service
 	void RefreshFavorites(PlayerCharacter* player);
+	
+	// Scan the players known spells and update the service
 	void RefreshSpellBook(PlayerCharacter* player);
+
+	// Scan the players known words of powers and update the service
 	void RefreshShouts(TESSpellList& spells);
 
 
