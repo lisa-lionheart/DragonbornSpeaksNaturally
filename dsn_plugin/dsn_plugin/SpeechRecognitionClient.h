@@ -8,40 +8,45 @@
 #include <sstream>
 #include <mutex>
 
-struct DialogueList
-{
-	std::vector<std::string> lines;
-};
+
+#include <Threading.h>
+
+typedef std::vector<std::string> TokenList;
+typedef std::function<void(const TokenList&)> TokenHandlerFunc;
 
 /*
 	Manage the c# service, creates the proccess handles IO
 */
-class SpeechRecognitionClient
+class SpeechRecognitionClient : public TaskQueue
 {
+
 public:
-	static SpeechRecognitionClient* getInstance();
+
+	// Start the service
+	SpeechRecognitionClient(std::string dllPath);
 
 	~SpeechRecognitionClient();
 	
-	// Start the service
-	void Start();
 
 	// Send a command to the service
 	void WriteLine(std::string str);
 
-	// Dialogue was closed
-	void StopDialogue();
-	// Start the speach recognition
-	void StartDialogue(DialogueList list);
 
-	// Return the response to the last dialogue call
-	// If not response return -1
-	// If goodbye phrase then -2
-	// Otherwise the index of the option selected
-	int ReadSelectedIndex();
-		
+
+	// Register interest in a handling a game command
+	// func: The function to execute
+	// bool: Should be defered to execution in a game thread, otherwise on the client thread
+	template<class T>
+	void RegisterHandler(T* inst, const char* command, void (T::*func)(const TokenList&), bool executeGameThread) {
+		TokenHandlerFunc handler = std::bind(func, inst, std::placeholders::_1);
+		commandHandlers[command] = std::make_tuple(handler, executeGameThread);
+	}
+	
+
 private:
-	static SpeechRecognitionClient* instance;
+
+
+	std::map<std::string, std::tuple<TokenHandlerFunc,bool>> commandHandlers;
 
 	HANDLE hChildStd_IN_Rd = NULL;
 	HANDLE hChildStd_IN_Wr = NULL;
@@ -49,18 +54,11 @@ private:
 	HANDLE hChildStd_OUT_Wr = NULL;
 	
 	DWORD ClientLoop();
-
-	int selectedIndex = -1;
-	int currentDialogueId = 0;
-
-	std::string workingLine;
+	
 
 	static DWORD WINAPI ThreadStart(void* a) {
 		return ((SpeechRecognitionClient*)a)->ClientLoop();
-	}
-	
-	SpeechRecognitionClient();
-
-	std::string ReadLine();
+	}	
+	void HandleLine(const std::string& line);
 };
 

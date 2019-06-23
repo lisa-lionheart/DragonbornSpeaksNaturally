@@ -9,10 +9,7 @@
 #include "VersionCheck.h"
 #include "SkyrimType.h"
 
-static const char* VERSION = "0.19";
 
-extern std::string g_dllPath("");
-extern void * g_moduleHandle = nullptr;
 
 extern "C"	{
 	BOOL WINAPI DllMain(
@@ -23,27 +20,21 @@ extern "C"	{
 		// Get the path to the DLL file
 		char DllPath[MAX_PATH] = { 0 };
 		GetModuleFileName(hinstDLL, DllPath, _countof(DllPath));
-		g_dllPath = std::string(DllPath);
+		std::string dllPath = std::string(DllPath);
 
 		// Perform actions based on the reason for calling.
 		switch (fdwReason)
 		{
 		case DLL_PROCESS_ATTACH:
 
+			// Initialize once for each new process.
+			// Return FALSE to fail DLL load.
+
 			if (!VersionCheck::IsCompatibleExeVersion()) {
 				return TRUE;
 			}
 
-			// Initialize once for each new process.
-			// Return FALSE to fail DLL load.
-			Log::info("DragonBornNaturallySpeaking loaded");
-			Log::info("Version %s", VERSION);
-			g_moduleHandle = (void *)hinstDLL;
-			g_branchTrampoline.Create(1024 * 64);
-			g_localTrampoline.Create(1024 * 64, g_moduleHandle);
-			Hooks_Inject();
-
-			SpeechRecognitionClient::getInstance()->Start();
+			Hooks::Start(dllPath, hinstDLL);
 
 			break;
 

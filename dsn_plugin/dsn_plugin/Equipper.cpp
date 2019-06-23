@@ -1,6 +1,7 @@
 #include "Equipper.h"
 #include "Log.h"
 #include "Threading.h"
+#include "ThreadAsserts.h"
 
 bool Equipper::CanEquipBothHands(Actor* actor, TESForm * item)
 {

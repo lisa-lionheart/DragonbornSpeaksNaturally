@@ -5,6 +5,9 @@
 TaskQueue g_GameThreadTaskQueue;
 TaskQueue g_ClientThreadTaskQueue;
 
+using std::vector;
+using std::string;
+using std::map;
 
 struct Task {
 	std::function<void(void)> func;
@@ -15,8 +18,19 @@ struct Task {
 
 thread_local TaskQueue* TaskQueue::executingQueue = NULL;
 
+void TaskQueue::AddPoll(void* name, const TaskFunc& poller) {
+	lock.lock();
+	pollFunctions[name] = poller;
+	lock.unlock();
+}
 
-void TaskQueue::ExecuteAction(const std::function<void(void)>& func, bool wait) {
+void TaskQueue::RemovePoll(void* name) {
+	lock.lock();
+	pollFunctions.erase(name);
+	lock.unlock();
+}
+
+void TaskQueue::ExecuteAction(const TaskFunc& func, bool wait) {
 	Task* task = new Task();
 	task->func = func;
 	task->blocking = wait;
@@ -35,6 +49,14 @@ void TaskQueue::ExecuteAction(const std::function<void(void)>& func, bool wait) 
 
 void TaskQueue::PumpThreadActions() {
 	executingQueue = this;
+	
+	lock.lock();
+	auto pollerCopy = pollFunctions;
+	lock.unlock();
+
+	for (auto itr = pollerCopy.begin(); itr != pollerCopy.end(); itr++) {
+		itr->second();
+	}
 
 	while (true) {
 		lock.lock();

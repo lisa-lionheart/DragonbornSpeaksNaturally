@@ -1,277 +1,123 @@
-#include "Hooks.h"
 #include <string.h>
 #include <set>
-#include "Log.h"
 #include "common/IPrefix.h"
 #include "skse64_common/SafeWrite.h"
-#include "skse64/ScaleformMovie.h"
-#include "skse64/ScaleformValue.h"
 #include "skse64/GameInput.h"
 #include "skse64_common/BranchTrampoline.h"
 #include "xbyak.h"
 #include "SkyrimType.h"
+
+#include "Hooks.h"
+#include "Log.h"
 #include "ConsoleCommandRunner.h"
-#include "FavoritesMenuManager.h"
+#include "EquipmentManager.h"
 #include "Threading.h"
+#include "GameStateController.h"
+#include "DialogueController.h"
 
-class RunCommandSink;
+using std::string;
 
-
-static RunCommandSink* runCommandSink = NULL;
-
-static GFxMovieView* dialogueMenu = NULL;
-
-static int desiredTopicIndex = 1;
-static int numTopics = 0;
-static int lastMenuState = -1;
-
-//typedef UInt32 getDefaultCompiler(void* unk01, char* compilerName, UInt32 unk03);
-//typedef void executeCommand(UInt32* unk01, void* parser, char* command);
+namespace Hooks {
 
 
-// Hook of 
-// GfxMovieView::Invoke(const char* name, GFxValue* result, GFxValue* args, UInt32 numArgs);
-//
-static void __cdecl Hook_Invoke(GFxMovieView* movie, const char* gfxMethod, GFxValue* argv, UInt32 argc)
-{
-	TRACE_METHOD();
+	TaskQueue taskQueue;
+	
+	static const char* VERSION = "0.19";
+	
+	class RunCommandSink;
+	RunCommandSink* runCommandSink = NULL;
 
-	if (argc >= 1)
+	SpeechRecognitionClient* speechClient = NULL;
+	ConsoleCommandRunner* console = NULL;
+
+	GameStateController* gameStateController = NULL;
+	EquipmentManager* favouritesManager = NULL;
+	DialogueControler* dialogueController = NULL;
+
+
+	void Start(string dllPath, HINSTANCE hInstDll)
 	{
-		GFxValue commandVal = argv[0];
-		if (commandVal.type == GFxValue::kType_String) { // Command
-			const char* command = commandVal.data.string;
-
-			//Log::debug("Command is: %s", command); // TEMP
-			if (strcmp(command, "PopulateDialogueList") == 0)
-			{
-				numTopics = (argc - 2) / 3;
-				desiredTopicIndex = -1;
-				dialogueMenu = movie;
-				std::vector<std::string> lines;
-				for (int j = 1; j < argc - 1; j = j + 3)
-				{
-					GFxValue dialogueLine = argv[j];
-					const char* dialogueLineStr = dialogueLine.data.string;
-					lines.push_back(std::string(dialogueLineStr));
-				}
-
-				DialogueList dialogueList;
-				dialogueList.lines = lines;
-				SpeechRecognitionClient::getInstance()->StartDialogue(dialogueList);
-			}
-			else if (g_SkyrimType == VR && strcmp(command, "UpdatePlayerInfo") == 0)
-			{
-				FavoritesMenuManager::getInstance()->RefreshAll();
-			}
-		}
-	}
-}
-
-
-
-/*
-* Monitor the state of the game and update the service so that it can choose which
-* Activations should be avalible
-*/
-class GameStateController : public BSTEventSink<MenuOpenCloseEvent> {
-
-
-	std::set<std::string> filter;
-	MenuManager* mm;
-
-	std::string currentMenu = "None";
-	
-	bool isInCombat = false;
-	bool isWeaponDrawn = false;
-	bool isSneaking = false;
-
-	
-	void SendStateChange() {
 		TRACE_METHOD();
 
-		std::ostringstream msg;		
-		msg << "GAMESTATE|";
-		msg << currentMenu << "|";
-		msg << isInCombat << "|";
-		msg << isWeaponDrawn << "|";
-		msg << isSneaking;		
+		Log::info("DragonBornNaturallySpeaking loaded");
+		Log::info("Version %s", VERSION);
 
-		SpeechRecognitionClient::getInstance()->WriteLine(msg.str());
-	}
+		g_branchTrampoline.Create(1024 * 64);
+		g_localTrampoline.Create(1024 * 64, (void*)hInstDll);
 
-public:
-	GameStateController() {
-		TRACE_METHOD();
+		Inject();
+			   
+		speechClient = new SpeechRecognitionClient(dllPath);
 
-		mm = MenuManager::GetSingleton();
-		mm->menuOpenCloseEventDispatcher.AddEventSink(this);
-
-		filter.insert("TweenMenu"); // Inbetween menu when you want to open magic, inventory etc
-		filter.insert("MapMarkerTest3D"); // The map menu
-		filter.insert("StatsMenu");
-		filter.insert("FavoritesMenu");
-		filter.insert("Journal Menu");
-		filter.insert("Inventory Menu");
-	}
-
-	// Monitor opening and closing of menus
-	EventResult ReceiveEvent(MenuOpenCloseEvent* evn, EventDispatcher<MenuOpenCloseEvent>* dispatcher) override {
-		TRACE_METHOD();
-
-		std::string newState = currentMenu;
-
-		if (evn->opening) {
-			std::string menuName(evn->menuName.c_str());
-			if (filter.find(menuName) != filter.end()) {
-				newState = menuName;
-			} else {
-				Log::debug("Ignored %s", menuName.c_str());
-			}
-		} else {
-			std::string menuName(evn->menuName.c_str());
-			if (menuName == currentMenu) {
-				newState = "None";
-			}
-			Log::debug("Closed %s", menuName.c_str());
-		}
-
-		if (newState != currentMenu) {
-			Log::info("Menu State: %s -> %s", currentMenu.c_str(), newState.c_str());
-			currentMenu = newState;
-			SendStateChange();
-		}
-		return kEvent_Continue;
-	}
-
-	void UpdatePlayerState() {
-	
-		//TRACE_METHOD();
-
-		PlayerCharacter* player = (*g_thePlayer);
-		if (player == NULL) {
-			return;
-		}
+		console = new ConsoleCommandRunner(speechClient);					
+		dialogueController = new DialogueControler(speechClient);
 		
-		bool change = false;
-
-		
-		// Breaks, makes the players hands become invisible??
-		//if (player->IsInCombat() != isInCombat) {
-		//	isInCombat = player->IsInCombat();
-		//	change = true;
-		//} 
-		
-
-		if (player->actorState.IsWeaponDrawn() != isWeaponDrawn) {
-			isWeaponDrawn = !!player->actorState.IsWeaponDrawn();
-			change = true;
-		}
-
-		bool sneak = (player->actorState.flags08 & ActorState::kState_Sneaking) != 0;
-		if (sneak != isSneaking) {
-			isSneaking = sneak;
-			change = true;
-		}
-
-		if (change) {
-			SendStateChange();
+		if (g_SkyrimType == VR) {	
+			favouritesManager = new EquipmentManager(speechClient, console);
+			gameStateController = new GameStateController(speechClient);
 		}
 	}
-};
 
-GameStateController* gameStateController = NULL;
-
-static void __cdecl Hook_PostLoad() {
-	TRACE_METHOD();
-
-	if (gameStateController == NULL) {
-		gameStateController = new GameStateController();
-	}
-
-	if (g_SkyrimType == VR) {	
-		FavoritesMenuManager::getInstance()->RefreshAll();
-	}
-}
-
-
-
-class RunCommandSink : public BSTEventSink<InputEvent> {
-	EventResult ReceiveEvent(InputEvent** evnArr, InputEventDispatcher* dispatcher) override {
-		// Unadvised, called every frame
-		//TRACE_METHOD();
-		g_GameThreadTaskQueue.PumpThreadActions();
-		if (gameStateController) {
-			gameStateController->UpdatePlayerState();
-		}
-		return kEvent_Continue;
-	}
-};
-
-
-// Called whilst the game is not paused
-static void __cdecl Hook_Loop()
-{
-	// Unadvised, called every frame
-	//TRACE_METHOD();
-
-	if (dialogueMenu != NULL)
+	// Hook of 
+	// GfxMovieView::Invoke
+	//
+	static void __cdecl Invoke(GFxMovieView* movie, const char* gfxMethod, GFxValue* argv, UInt32 argc)
 	{
-		// Menu exiting, avoid NPE
-		if (dialogueMenu->GetPause() == 0)
+		TRACE_METHOD();
+		if (argc >= 1)
 		{
-			dialogueMenu = NULL;
-			SpeechRecognitionClient::getInstance()->StopDialogue();
-			return;
-		}
-		GFxValue stateVal;
-		dialogueMenu->GetVariable(&stateVal, "_level0.DialogueMenu_mc.eMenuState");
-		int menuState = stateVal.data.number;
-		desiredTopicIndex = SpeechRecognitionClient::getInstance()->ReadSelectedIndex();
-		if (menuState != lastMenuState) {
-		
-			lastMenuState = menuState;
-			if (menuState == 2) // NPC Responding
-			{
-				// fix issue #11 (SSE crash when teleport with a dialogue line).
-				// It seems no side effects have been found at present.
-				dialogueMenu = NULL;
-				SpeechRecognitionClient::getInstance()->StopDialogue();
-				return;
+			GFxValue commandVal = argv[0];
+			if (commandVal.type == GFxValue::kType_String) { // Command
+				const char* command = commandVal.data.string;
+				//Log::debug("Command is: %s", command); // TEMP
+				if (strcmp(command, "PopulateDialogueList") == 0)
+				{
+					dialogueController->StartDialogue(movie, argv, argc);
+				}
+				else if (strcmp(command, "UpdatePlayerInfo") == 0)
+				{
+					if (favouritesManager) {
+						favouritesManager->RefreshAll();
+					}
+				}
 			}
-		}
-		if (desiredTopicIndex >= 0) {
-			GFxValue topicIndexVal;
-			dialogueMenu->GetVariable(&topicIndexVal, "_level0.DialogueMenu_mc.TopicList.iSelectedIndex");
-
-			int currentTopicIndex = topicIndexVal.data.number;
-			if (currentTopicIndex != desiredTopicIndex) {
-
-				dialogueMenu->Invoke("_level0.DialogueMenu_mc.TopicList.SetSelectedTopic", NULL, "%d", desiredTopicIndex);
-				dialogueMenu->Invoke("_level0.DialogueMenu_mc.TopicList.doSetSelectedIndex", NULL, "%d", desiredTopicIndex);
-				dialogueMenu->Invoke("_level0.DialogueMenu_mc.TopicList.UpdateList", NULL, NULL, 0);
-			}
-
-			dialogueMenu->Invoke("_level0.DialogueMenu_mc.onSelectionClick", NULL, "%d", 1.0);
-		}
-		else if (desiredTopicIndex == -2) { // Indicates a "goodbye" phrase was spoken, hide the menu
-			dialogueMenu->Invoke("_level0.DialogueMenu_mc.StartHideMenu", NULL, NULL, 0);
 		}
 	}
-	else
+
+	// Called when the game load from a save
+	static void __cdecl PostLoad() {
+		TRACE_METHOD();
+		if (favouritesManager) {
+			favouritesManager->RefreshAll();
+		}
+	}
+
+
+	class RunCommandSink : public BSTEventSink<InputEvent> {
+		EventResult ReceiveEvent(InputEvent** evnArr, InputEventDispatcher* dispatcher) override {
+			// Unadvised, called every frame
+			TRACE_METHOD();
+			taskQueue.PumpThreadActions();
+			return kEvent_Continue;
+		}
+	};
+
+
+	// Called whilst the game is not paused
+	static void __cdecl Loop()
 	{
+		// Unadvised, called every frame
+		TRACE_METHOD();
 		if (g_SkyrimType == VR) {
-			g_GameThreadTaskQueue.PumpThreadActions();
-			if (gameStateController) {
-				gameStateController->UpdatePlayerState();
-			}
-		} else {
+			taskQueue.PumpThreadActions();
+		}
+		else {
 			// The latest version of SkyrimSE will not enter the loop if no menu is displayed.
 			// So we use InputEventSink to get a continuous running loop.
 			static bool inited = false;
 			if (!inited) {
 				Log::info("RunCommandSink Initialized");
-				runCommandSink = new RunCommandSink;
+				runCommandSink = new Hooks::RunCommandSink;
 				// Currently in the source code directory is the latest version of SKSE64 instead of SKSEVR,
 				// so we can call GetSingleton() directly instead of use a RelocAddr.
 				auto inputEventDispatcher = InputEventDispatcher::GetSingleton();
@@ -280,165 +126,169 @@ static void __cdecl Hook_Loop()
 			}
 		}
 	}
-	
-}
 
-static uintptr_t loopEnter = 0x0;
-static uintptr_t loopCallTarget = 0x0;
-static uintptr_t invokeTarget = 0x0;
-static uintptr_t invokeReturn = 0x0;
-static uintptr_t loadEventEnter = 0x0;
-static uintptr_t loadEventTarget = 0x0;
+	static uintptr_t loopEnter = 0x0;
+	static uintptr_t loopCallTarget = 0x0;
+	static uintptr_t invokeTarget = 0x0;
+	static uintptr_t invokeReturn = 0x0;
+	static uintptr_t loadEventEnter = 0x0;
+	static uintptr_t loadEventTarget = 0x0;
 
-static uintptr_t INVOKE_ENTER_ADDR[3];
-static uintptr_t INVOKE_TARGET_ADDR[3];
+	static uintptr_t INVOKE_ENTER_ADDR[3];
+	static uintptr_t INVOKE_TARGET_ADDR[3];
 
-static uintptr_t LOOP_ENTER_ADDR[3];
-static uintptr_t LOOP_TARGET_ADDR[3];
+	static uintptr_t LOOP_ENTER_ADDR[3];
+	static uintptr_t LOOP_TARGET_ADDR[3];
 
-static uintptr_t LOAD_EVENT_ENTER_ADDR[3];
-static uintptr_t LOAD_EVENT_TARGET_ADDR[3];
+	static uintptr_t LOAD_EVENT_ENTER_ADDR[3];
+	static uintptr_t LOAD_EVENT_TARGET_ADDR[3];
 
+	/**
+		Inject hooks into the game, here be dragons
+	*/
+	void Inject(void)
+	{
+		TRACE_METHOD();
 
-void Hooks_Inject(void)
-{
-	// "call" Scaleform invocation
-	INVOKE_ENTER_ADDR[SE] = 0xED68EE;
-	INVOKE_ENTER_ADDR[VR] = 0xF343CE;
-	INVOKE_ENTER_ADDR[VR_BETA] = 0xF343CE;
+		// "call" Scaleform invocation
+		INVOKE_ENTER_ADDR[SE] = 0xED68EE;
+		INVOKE_ENTER_ADDR[VR] = 0xF343CE;
+		INVOKE_ENTER_ADDR[VR_BETA] = 0xF343CE;
 
-	// Target of "call" invocation
-	INVOKE_TARGET_ADDR[SE] = 0xED7DF0; // SkyrimSE 0xED7DF0 0x00007FF7C38D7DF0
-	INVOKE_TARGET_ADDR[VR] = 0xF30F20; // SkyrimVR 0xF2D9B0 0x00007FF73284D9B0
-	INVOKE_TARGET_ADDR[VR_BETA] = 0xF30F20; // SkyrimVR 0xF2D9B0 0x00007FF73284D9B0
+		// Target of "call" invocation
+		INVOKE_TARGET_ADDR[SE] = 0xED7DF0; // SkyrimSE 0xED7DF0 0x00007FF7C38D7DF0
+		INVOKE_TARGET_ADDR[VR] = 0xF30F20; // SkyrimVR 0xF2D9B0 0x00007FF73284D9B0
+		INVOKE_TARGET_ADDR[VR_BETA] = 0xF30F20; // SkyrimVR 0xF2D9B0 0x00007FF73284D9B0
 
-	// "CurrentTime" GFxMovie.SetVariable (rax+80)
-	LOOP_ENTER_ADDR[SE] = 0xECD637; // SkyrimSE 0xECD637 0x00007FF712D4D637
-	LOOP_ENTER_ADDR[VR] = 0x8AC25C; // 0x8AA36C 0x00007FF7321CA36C SKSE UIManager process hook:  0x00F17200 + 0xAD8
-	LOOP_ENTER_ADDR[VR_BETA] = 0x8AC25C; // 0x8AA36C 0x00007FF7321CA36C SKSE UIManager process hook:  0x00F17200 + 0xAD8
-	
-	// "CurrentTime" GFxMovie.SetVariable Target (rax+80)
-	LOOP_TARGET_ADDR[SE] = 0xF28C90; // SkyrimSE 0xF28C90 0x00007FF712DA8C90
-	LOOP_TARGET_ADDR[VR] = 0xF85C50; // SkyrimVR 0xF82710 0x00007FF7328A2710 SKSE UIManager process hook:  0x00F1C650
-	LOOP_TARGET_ADDR[VR_BETA] = 0xF85C50; // SkyrimVR 0xF82710 0x00007FF7328A2710 SKSE UIManager process hook:  0x00F1C650
+		// "CurrentTime" GFxMovie.SetVariable (rax+80)
+		LOOP_ENTER_ADDR[SE] = 0xECD637; // SkyrimSE 0xECD637 0x00007FF712D4D637
+		LOOP_ENTER_ADDR[VR] = 0x8AC25C; // 0x8AA36C 0x00007FF7321CA36C SKSE UIManager process hook:  0x00F17200 + 0xAD8
+		LOOP_ENTER_ADDR[VR_BETA] = 0x8AC25C; // 0x8AA36C 0x00007FF7321CA36C SKSE UIManager process hook:  0x00F17200 + 0xAD8
 
-	// "Finished loading game" print statement, initialize player orientation?
-	LOAD_EVENT_ENTER_ADDR[VR] = 0x5852A4;
+		// "CurrentTime" GFxMovie.SetVariable Target (rax+80)
+		LOOP_TARGET_ADDR[SE] = 0xF28C90; // SkyrimSE 0xF28C90 0x00007FF712DA8C90
+		LOOP_TARGET_ADDR[VR] = 0xF85C50; // SkyrimVR 0xF82710 0x00007FF7328A2710 SKSE UIManager process hook:  0x00F1C650
+		LOOP_TARGET_ADDR[VR_BETA] = 0xF85C50; // SkyrimVR 0xF82710 0x00007FF7328A2710 SKSE UIManager process hook:  0x00F1C650
 
-	// Initialize player orientation target addr
-	LOAD_EVENT_TARGET_ADDR[VR] = 0x6AB5E0;
+		// "Finished loading game" print statement, initialize player orientation?
+		LOAD_EVENT_ENTER_ADDR[VR] = 0x5852A4;
 
-	RelocAddr<uintptr_t> kHook_Invoke_Enter(INVOKE_ENTER_ADDR[g_SkyrimType]);
-	RelocAddr<uintptr_t> kHook_Invoke_Target(INVOKE_TARGET_ADDR[g_SkyrimType]);
-	RelocAddr<uintptr_t> kHook_Loop_Enter(LOOP_ENTER_ADDR[g_SkyrimType]);
-	RelocAddr<uintptr_t> kHook_Loop_Call_Target(LOOP_TARGET_ADDR[g_SkyrimType]);
-	uintptr_t kHook_Invoke_Return = kHook_Invoke_Enter + 0x14;
+		// Initialize player orientation target addr
+		LOAD_EVENT_TARGET_ADDR[VR] = 0x6AB5E0;
 
-	invokeTarget = kHook_Invoke_Target;
-	invokeReturn = kHook_Invoke_Return;
-	loopCallTarget = kHook_Loop_Call_Target;
-	loopEnter = kHook_Loop_Enter;
+		RelocAddr<uintptr_t> kHook_Invoke_Enter(INVOKE_ENTER_ADDR[g_SkyrimType]);
+		RelocAddr<uintptr_t> kHook_Invoke_Target(INVOKE_TARGET_ADDR[g_SkyrimType]);
+		RelocAddr<uintptr_t> kHook_Loop_Enter(LOOP_ENTER_ADDR[g_SkyrimType]);
+		RelocAddr<uintptr_t> kHook_Loop_Call_Target(LOOP_TARGET_ADDR[g_SkyrimType]);
+		uintptr_t kHook_Invoke_Return = kHook_Invoke_Enter + 0x14;
 
-	Log::info("Loop Enter: %p", kHook_Loop_Enter);
-	Log::info("Loop Target: %p", kHook_Loop_Call_Target);
+		invokeTarget = kHook_Invoke_Target;
+		invokeReturn = kHook_Invoke_Return;
+		loopCallTarget = kHook_Loop_Call_Target;
+		loopEnter = kHook_Loop_Enter;
 
-	/***
-	Post Load HOOK - VR Only
-	**/
-	if (g_SkyrimType == VR) {
-		RelocAddr<uintptr_t> kHook_LoadEvent_Enter(LOAD_EVENT_ENTER_ADDR[g_SkyrimType]);
-		RelocAddr<uintptr_t> kHook_LoadEvent_Target(LOAD_EVENT_TARGET_ADDR[g_SkyrimType]);
-		loadEventEnter = kHook_LoadEvent_Enter;
-		loadEventTarget = kHook_LoadEvent_Target;
+		Log::info("Loop Enter: %p", kHook_Loop_Enter.GetUIntPtr());
+		Log::info("Loop Target: %p", kHook_Loop_Call_Target.GetUIntPtr());
 
-		Log::info("LoadEvent Enter: %p", kHook_LoadEvent_Enter);
-		Log::info("LoadEvent Target: %p", kHook_LoadEvent_Target);
+		/***
+		Post Load HOOK - VR Only
+		**/
+		if (g_SkyrimType == VR) {
+			RelocAddr<uintptr_t> kHook_LoadEvent_Enter(LOAD_EVENT_ENTER_ADDR[g_SkyrimType]);
+			RelocAddr<uintptr_t> kHook_LoadEvent_Target(LOAD_EVENT_TARGET_ADDR[g_SkyrimType]);
+			loadEventEnter = kHook_LoadEvent_Enter;
+			loadEventTarget = kHook_LoadEvent_Target;
 
-		struct Hook_LoadEvent_Code : Xbyak::CodeGenerator {
-			Hook_LoadEvent_Code(void * buf) : Xbyak::CodeGenerator(4096, buf)
+			Log::info("LoadEvent Enter: %p", kHook_LoadEvent_Enter.GetUIntPtr());
+			Log::info("LoadEvent Target: %p", kHook_LoadEvent_Target.GetUIntPtr());
+
+			struct Hook_LoadEvent_Code : Xbyak::CodeGenerator {
+				Hook_LoadEvent_Code(void* buf) : Xbyak::CodeGenerator(4096, buf)
+				{
+					// Invoke original virtual method
+					mov(rax, (uintptr_t)loadEventTarget);
+					call(rax);
+
+					// Call our method
+					sub(rsp, 0x30);
+					mov(rax, (uintptr_t)PostLoad);
+					call(rax);
+					add(rsp, 0x30);
+
+					// Return 
+					mov(rax, loadEventEnter + 0x5);
+					jmp(rax);
+				}
+			};
+			void* codeBuf = g_localTrampoline.StartAlloc();
+			Hook_LoadEvent_Code loadEventCode(codeBuf);
+			g_localTrampoline.EndAlloc(loadEventCode.getCurr());
+			g_branchTrampoline.Write5Branch(kHook_LoadEvent_Enter, uintptr_t(loadEventCode.getCode()));
+		}
+
+		/***
+		Loop HOOK
+		**/
+		struct Hook_Loop_Code : Xbyak::CodeGenerator {
+			Hook_Loop_Code(void* buf) : Xbyak::CodeGenerator(4096, buf)
 			{
 				// Invoke original virtual method
-				mov(rax, (uintptr_t)loadEventTarget);
+				mov(rax, loopCallTarget);
 				call(rax);
 
 				// Call our method
 				sub(rsp, 0x30);
-				mov(rax, (uintptr_t)Hook_PostLoad);
+				mov(rax, (uintptr_t)Loop);
 				call(rax);
 				add(rsp, 0x30);
 
 				// Return 
-				mov(rax, loadEventEnter + 0x5);
+				mov(rax, loopEnter + 0x6); // set to 0x5 when branching for SKSE UIManager
 				jmp(rax);
 			}
 		};
-		void * codeBuf = g_localTrampoline.StartAlloc();
-		Hook_LoadEvent_Code loadEventCode(codeBuf);
-		g_localTrampoline.EndAlloc(loadEventCode.getCurr());
-		g_branchTrampoline.Write5Branch(kHook_LoadEvent_Enter, uintptr_t(loadEventCode.getCode()));
+		void* codeBuf = g_localTrampoline.StartAlloc();
+		Hook_Loop_Code loopCode(codeBuf);
+		g_localTrampoline.EndAlloc(loopCode.getCurr());
+		//g_branchTrampoline.Write6Branch(kHook_Loop_Enter, uintptr_t(loopCode.getCode()));
+		g_branchTrampoline.Write5Branch(kHook_Loop_Enter, uintptr_t(loopCode.getCode()));
+
+		/***
+		Invoke "call" HOOK
+		**/
+		struct Hook_Entry_Code : Xbyak::CodeGenerator {
+			Hook_Entry_Code(void* buf) : Xbyak::CodeGenerator(4096, buf)
+			{
+				push(rcx);
+				push(rdx);
+				push(r8);
+				push(r9);
+				sub(rsp, 0x30);
+				mov(rax, (uintptr_t)Invoke);
+				call(rax);
+				add(rsp, 0x30);
+				pop(r9);
+				pop(r8);
+				pop(rdx);
+				pop(rcx);
+
+				mov(rax, invokeTarget);
+				call(rax);
+
+				mov(rbx, ptr[rsp + 0x50]);
+				mov(rsi, ptr[rsp + 0x60]);
+				add(rsp, 0x40);
+				pop(rdi);
+
+				mov(rax, invokeReturn);
+				jmp(rax);
+			}
+		};
+
+		codeBuf = g_localTrampoline.StartAlloc();
+		Hook_Entry_Code entryCode(codeBuf);
+		g_localTrampoline.EndAlloc(entryCode.getCurr());
+		g_branchTrampoline.Write5Branch(kHook_Invoke_Enter, uintptr_t(entryCode.getCode()));
 	}
 
-	/***
-	Loop HOOK
-	**/
-	struct Hook_Loop_Code : Xbyak::CodeGenerator {
-		Hook_Loop_Code(void * buf) : Xbyak::CodeGenerator(4096, buf)
-		{
-			// Invoke original virtual method
-			mov(rax, loopCallTarget);
-			call(rax);
-
-			// Call our method
-			sub(rsp, 0x30);
-			mov(rax, (uintptr_t)Hook_Loop);
-			call(rax);
-			add(rsp, 0x30);
-
-			// Return 
-			mov(rax, loopEnter + 0x6); // set to 0x5 when branching for SKSE UIManager
-			jmp(rax);
-		}
-	};
-	void * codeBuf = g_localTrampoline.StartAlloc();
-	Hook_Loop_Code loopCode(codeBuf);
-	g_localTrampoline.EndAlloc(loopCode.getCurr());
-	//g_branchTrampoline.Write6Branch(kHook_Loop_Enter, uintptr_t(loopCode.getCode()));
-	g_branchTrampoline.Write5Branch(kHook_Loop_Enter, uintptr_t(loopCode.getCode()));
-
-	/***
-	Invoke "call" HOOK
-	**/
-	struct Hook_Entry_Code : Xbyak::CodeGenerator {
-		Hook_Entry_Code(void * buf) : Xbyak::CodeGenerator(4096, buf)
-		{
-			push(rcx);
-			push(rdx);
-			push(r8);
-			push(r9);
-			sub(rsp, 0x30);
-			mov(rax, (uintptr_t)Hook_Invoke);
-			call(rax);
-			add(rsp, 0x30);
-			pop(r9);
-			pop(r8);
-			pop(rdx);
-			pop(rcx);
-	
-			mov(rax, invokeTarget);
-			call(rax);
-
-			mov(rbx, ptr[rsp + 0x50]);
-			mov(rsi, ptr[rsp + 0x60]);
-			add(rsp, 0x40);
-			pop(rdi);
-
-			mov(rax, invokeReturn);
-			jmp(rax);
-		}
-	};
-
-	codeBuf = g_localTrampoline.StartAlloc();
-	Hook_Entry_Code entryCode(codeBuf);
-	g_localTrampoline.EndAlloc(entryCode.getCurr());
-	g_branchTrampoline.Write5Branch(kHook_Invoke_Enter, uintptr_t(entryCode.getCode()));
 }

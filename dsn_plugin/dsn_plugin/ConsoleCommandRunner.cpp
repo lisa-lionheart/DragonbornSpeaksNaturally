@@ -15,31 +15,37 @@
 #include <algorithm>
 #include <map>
 #include "Threading.h"
+#include "ThreadAsserts.h"
+#include "SpeechRecognitionClient.h"
 
-static IMenu* consoleMenu = NULL;
 
-struct Command {
-	const char* name;
-	const std::function<void(std::vector<std::string>)> handler;
-};
+using std::vector;
+using std::string;
 
-// Registered custom commands
-Command commands[] = {
-	{ "press" , ConsoleCommandRunner::CustomCommandPress },
-	{ "tapkey", ConsoleCommandRunner::CustomCommandTapKey },
-	{ "holdkey", ConsoleCommandRunner::CustomCommandHoldKey },
-	{ "releasekey", ConsoleCommandRunner::CustomCommandReleaseKey },
-	{ "sleep", ConsoleCommandRunner::CustomCommandSleep },
-	{ "switchwindow", ConsoleCommandRunner::CustomCommandSwitchWindow },
-	{ "trycast", ConsoleCommandRunner::CustomCommandTryCast },
-	{ "pushequip", ConsoleCommandRunner::CustomCommandPushEquip },
-	{ "popequip", ConsoleCommandRunner::CustomCommandPopEquip },
-	{  NULL, NULL }
-};
 
-std::stack<TESForm*> ConsoleCommandRunner::equipStack;
+ConsoleCommandRunner::ConsoleCommandRunner(SpeechRecognitionClient* client) {
+	
+	client->RegisterHandler(this, "COMMAND", &ConsoleCommandRunner::HandleCommands, false);
 
-void ConsoleCommandRunner::RunCommand(std::string command) {
+	commands.insert_or_assign("press", &ConsoleCommandRunner::CustomCommandPress);
+	commands.insert_or_assign("tapkey", &ConsoleCommandRunner::CustomCommandTapKey);
+	commands.insert_or_assign("holdkey", &ConsoleCommandRunner::CustomCommandHoldKey);
+	commands.insert_or_assign("releasekey", &ConsoleCommandRunner::CustomCommandReleaseKey);
+	commands.insert_or_assign("sleep", &ConsoleCommandRunner::CustomCommandSleep);
+	commands.insert_or_assign("switchwindow", &ConsoleCommandRunner::CustomCommandSwitchWindow);
+	commands.insert_or_assign("trycast", &ConsoleCommandRunner::CustomCommandTryCast);
+	commands.insert_or_assign("pushequip", &ConsoleCommandRunner::CustomCommandPushEquip);
+	commands.insert_or_assign("popequip", &ConsoleCommandRunner::CustomCommandPopEquip);
+}
+
+void ConsoleCommandRunner::HandleCommands(const TokenList& tokens) {
+	vector<string> commands = Utils::split(tokens[1], ';');
+	for (int i = 0; i < commands.size(); i++) {
+		RunCommand(commands[i]);
+	}
+}
+
+void ConsoleCommandRunner::RunCommand(string command) {
 
 	ASSERT_IS_CLIENT_THREAD();
 
@@ -52,46 +58,45 @@ void ConsoleCommandRunner::RunCommand(std::string command) {
 	// we block the execution however to ensure a mixture of custom and vanilla
 	// comands are executed sequentually
 	if (!ConsoleCommandRunner::TryRunCustomCommand(command)) {
-		g_GameThreadTaskQueue.ExecuteAction(std::bind(&ConsoleCommandRunner::RunVanillaCommand, command), true);
+		Hooks::taskQueue.ExecuteAction(this, &ConsoleCommandRunner::RunVanillaCommand, command, true);
 	}
 }
 
-void ConsoleCommandRunner::RunVanillaCommand(std::string command) {
+void ConsoleCommandRunner::RunVanillaCommand(string command) {
 
 	ASSERT_IS_GAME_THREAD();
 
 	if (!consoleMenu) {
 		Log::info("Trying to create Console menu");
 		consoleMenu = DSNMenuManager::GetOrCreateMenu("Console");
+		if (!consoleMenu) {
+			Log::error("Unable to find Console menu");
+			return;
+		}
 	}
 
-	if (consoleMenu != NULL) {
-		Log::debug("Invoking command: %s", command.c_str());
+	Log::debug("Invoking command: %s", command.c_str());
 
-		GFxValue methodName;
-		methodName.type = GFxValue::kType_String;
-		methodName.data.string = "ExecuteCommand";
-		GFxValue resphash;
-		resphash.type = GFxValue::kType_Number;
-		resphash.data.number = -1;
-		GFxValue commandVal;
-		commandVal.type = GFxValue::kType_String;
-		commandVal.data.string = command.c_str();
-		GFxValue args[3];
-		args[0] = methodName;
-		args[1] = resphash;
-		args[2] = commandVal;
+	GFxValue methodName;
+	methodName.type = GFxValue::kType_String;
+	methodName.data.string = "ExecuteCommand";
+	GFxValue resphash;
+	resphash.type = GFxValue::kType_Number;
+	resphash.data.number = -1;
+	GFxValue commandVal;
+	commandVal.type = GFxValue::kType_String;
+	commandVal.data.string = command.c_str();
+	GFxValue args[3];
+	args[0] = methodName;
+	args[1] = resphash;
+	args[2] = commandVal;
 
-		GFxValue resp;
-		consoleMenu->view->Invoke("flash.external.ExternalInterface.call", &resp, args, 3);
-	}
-	else
-	{
-		Log::info("Unable to find Console menu");
-	}
+	GFxValue resp;
+	consoleMenu->view->Invoke("flash.external.ExternalInterface.call", &resp, args, 3);
+	
 }
 
-bool ConsoleCommandRunner::TryRunCustomCommand(const std::string & command) {
+bool ConsoleCommandRunner::TryRunCustomCommand(const string& command) {
 	ASSERT_IS_CLIENT_THREAD();
 
 	std::vector<std::string> params = splitParams(command);
@@ -101,14 +106,10 @@ bool ConsoleCommandRunner::TryRunCustomCommand(const std::string & command) {
 	}
 	
 	std::string action = params[0];	
-	for (int i = 0;; i++) {
-		if (commands[i].name == NULL) {
-			return false;
-		}
-		if (stricmp(commands[i].name, action.c_str()) == 0) {
-			commands[i].handler(params);
-			return true;
-		}
+	
+	if(commands.count(action)) {
+		(this->*commands[action])(params);
+		return true;	
 	}
 
 
@@ -116,22 +117,16 @@ bool ConsoleCommandRunner::TryRunCustomCommand(const std::string & command) {
 }
 
 
-void ConsoleCommandRunner::CustomCommandPress(std::vector<std::string> params) {
+void ConsoleCommandRunner::CustomCommandPress(const TokenList& params) {
 	std::vector<UInt32 /*key*/> keyDown;
 	std::map<UInt32 /*time*/, UInt32 /*key*/> keyUp;
-
-	// If time does not exist, set as kDefaultKeyPressTime milliseconds
-	if ((params.size() - 1) % 2 > 0) {
-		params.push_back(std::to_string(kDefaultKeyPressTime));
-	}
 
 	// command: press <key> <time> <key> <time> ...
 	//           [0]   [1]   [2]    [3]   [4]
 	for (size_t i = 1; i + 1 < params.size(); i += 2) {
 		const std::string &keyStr = params[i];
-		const std::string &timeStr = params[i + 1];
+		
 		UInt32 key = 0;
-		UInt32 time = 0;
 
 		if (keyStr.empty()) {
 			continue;
@@ -141,8 +136,12 @@ void ConsoleCommandRunner::CustomCommandPress(std::vector<std::string> params) {
 		if (key == 0) {
 			continue;
 		}
+		
+		UInt32 time = kDefaultKeyPressTime;
+		if (params.size() >= (i+1)) {
+			time = strtol(params[i + 1].c_str(), NULL, 10);
+		}
 
-		time = strtol(timeStr.c_str(), NULL, 10);
 		if (time == 0) {
 			continue;
 		}
@@ -174,7 +173,7 @@ void ConsoleCommandRunner::CustomCommandPress(std::vector<std::string> params) {
 	}
 }
 
-void ConsoleCommandRunner::CustomCommandTapKey(std::vector<std::string> params) {
+void ConsoleCommandRunner::CustomCommandTapKey(const TokenList& params) {
 	std::vector<std::string> newParams = { "press" };
 	for (auto itr = ++params.begin(); itr != params.end(); itr++) {
 		newParams.push_back(*itr);
@@ -183,7 +182,7 @@ void ConsoleCommandRunner::CustomCommandTapKey(std::vector<std::string> params) 
 	CustomCommandPress(newParams);
 }
 
-void ConsoleCommandRunner::CustomCommandHoldKey(std::vector<std::string> params) {
+void ConsoleCommandRunner::CustomCommandHoldKey(const TokenList& params) {
 	for (auto itr = ++params.begin(); itr != params.end(); itr++) {
 		UInt32 key = GetKeyScanCode(*itr);
 		if (key != 0) {
@@ -192,7 +191,7 @@ void ConsoleCommandRunner::CustomCommandHoldKey(std::vector<std::string> params)
 	}
 }
 
-void ConsoleCommandRunner::CustomCommandReleaseKey(std::vector<std::string> params) {
+void ConsoleCommandRunner::CustomCommandReleaseKey(const TokenList& params) {
 	for (auto itr = ++params.begin(); itr != params.end(); itr++) {
 		UInt32 key = GetKeyScanCode(*itr);
 		if (key != 0) {
@@ -201,12 +200,12 @@ void ConsoleCommandRunner::CustomCommandReleaseKey(std::vector<std::string> para
 	}
 }
 
-void ConsoleCommandRunner::CustomCommandSleep(std::vector<std::string> params) {
+void ConsoleCommandRunner::CustomCommandSleep(const TokenList& params) {
 	if (params.size() < 2) {
 		return;
 	}
 
-	std::string &time = params[1];
+	string time = params[1];
 	time_t millisecond = 0;
 
 	if (time.size() > 2 && time[0] == '0' && (time[1] == 'x' || time[1] == 'X')) {
@@ -223,7 +222,7 @@ void ConsoleCommandRunner::CustomCommandSleep(std::vector<std::string> params) {
 	}
 }
 
-void ConsoleCommandRunner::CustomCommandSwitchWindow(std::vector<std::string> params) {
+void ConsoleCommandRunner::CustomCommandSwitchWindow(const TokenList& params) {
 	HWND window = NULL;
 	DWORD pid = 0;
 	std::string windowTitle;
@@ -265,7 +264,7 @@ void ConsoleCommandRunner::CustomCommandSwitchWindow(std::vector<std::string> pa
 	}
 }
 // trycast <spellid> <slot>
-void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params) {
+void ConsoleCommandRunner::CustomCommandTryCast(const TokenList& params) {
 
 	if (params.size() != 3) {
 		Log::error("trycast: Expecting 2 parameters got %d", params.size());
@@ -336,7 +335,7 @@ void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params)
 			break;
 		case FormType::kFormType_Weapon:
 			// TODO: Get the right instance of the item rather than the first matching
-			g_GameThreadTaskQueue.ExecuteAction(std::bind(papyrusActor::EquipItemEx, player, saveSlotItem, slotId, false, false), true);
+			Hooks::taskQueue.ExecuteAction(std::bind(papyrusActor::EquipItemEx, player, saveSlotItem, slotId, false, false), true);
 			break;
 		default:
 			Log::error("trycast: Don't know how to restore previous state: %s", Utils::inspect(saveSlotItem).c_str());
@@ -349,7 +348,7 @@ void ConsoleCommandRunner::CustomCommandTryCast(std::vector<std::string> params)
 	Log::debug("trycast exits");
 }
 
-void ConsoleCommandRunner::CustomCommandPushEquip(std::vector<std::string> params) {
+void ConsoleCommandRunner::CustomCommandPushEquip(const TokenList& params) {
 
 
 	PlayerCharacter* player = *g_thePlayer.GetPtr();
@@ -373,7 +372,7 @@ void ConsoleCommandRunner::CustomCommandPushEquip(std::vector<std::string> param
 	equipStack.push(saveSlotItem);
 }
 
-void ConsoleCommandRunner::CustomCommandPopEquip(std::vector<std::string> params) {
+void ConsoleCommandRunner::CustomCommandPopEquip(const TokenList& params) {
 
 	PlayerCharacter* player = *g_thePlayer.GetPtr();
 	if (!player) {
@@ -406,7 +405,7 @@ void ConsoleCommandRunner::CustomCommandPopEquip(std::vector<std::string> params
 		break;
 	case FormType::kFormType_Weapon:
 		// TODO: Get the right instance of the item rather than the first matching
-		g_GameThreadTaskQueue.ExecuteAction(std::bind(papyrusActor::EquipItemEx, player, popped, slotId, false, false), true);
+		Hooks::taskQueue.ExecuteAction(std::bind(papyrusActor::EquipItemEx, player, popped, slotId, false, false), true);
 		break;
 	default:
 		Log::error("popequip: Don't know how to restore previous state: %s", Utils::inspect(popped).c_str());

@@ -1,10 +1,11 @@
 #pragma once
 #include <string>
+#include <vector>
 
 class TESForm;
 class Actor;
 class SpellItem;
-
+class BaseExtraList;
 
 enum
 {
@@ -17,31 +18,41 @@ enum
 };
 
 
-class Utils
+namespace Utils
 {
+	using std::string;
+	using std::vector;
 
-public:
 	// Format integral values as hex
-	static std::string fmt_hex(UInt32 val);
-	static std::string fmt_hex(UInt64 val);
+	string fmt_hex(UInt32 val);
+	string fmt_hex(UInt64 val);
 
-	static std::string fmt_flags(uint32_t val);
-
-
-	static std::string inspect(TESForm* form);
+	string fmt_flags(uint32_t val);
 
 
-	static SInt32 getSlot(std::string name);
+	string inspect(TESForm* form);
+
+
+	SInt32 getSlot(string name);
+
+	// Split a string
+	vector<string> split(const string& s, char delim);
 
 	/*
 	* Get the currently equipped item or spell for this actors slot
 	* slot = "left","right","voice"
 	*/
-	static TESForm* getEquippedSlot(Actor* actor, SInt32 slotId);
+	TESForm* getEquippedSlot(Actor* actor, SInt32 slotId);
 
 	/*
 	* Look in a players spell list and find the specified spell if the know it
 	*/
-	static SpellItem* resolvePlayerSpell(Actor* actor, std::string spellid);
+	SpellItem* resolvePlayerSpell(Actor* actor, string spellid);
+
+
+	SInt32 fmCalcItemId(TESForm* form, BaseExtraList* extraList);
+
+	bool IsEquipmentSingleHanded(TESForm* item);
 };
+
 

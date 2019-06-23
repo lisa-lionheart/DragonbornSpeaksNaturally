@@ -37,7 +37,7 @@ public:
 	}
 
 	inline ~MethodTracer() {
-		Log::trace("Fucntion %s exits", name);
+		Log::trace("Function %s exits", name);
 	}
 
 };

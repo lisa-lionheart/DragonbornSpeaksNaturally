@@ -5,4 +5,14 @@
 #include "skse64_common/Relocation.h"
 #include "common/IPrefix.h"
 
-void Hooks_Inject(void);
+#include <Threading.h>
+
+
+namespace Hooks {
+	extern TaskQueue taskQueue;
+	extern SpeechRecognitionClient* speechClient;
+
+	void Start(std::string dllPath, HINSTANCE hInstDll);
+
+	void Inject();
+}

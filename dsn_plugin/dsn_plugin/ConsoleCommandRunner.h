@@ -9,32 +9,40 @@
 #include <functional>
 #include <Windows.h>
 #include <stack>
+#include <map>
+
+
 
 class TESForm;
+class SpeechRecognitionClient;
+typedef std::vector<std::string> TokenList;
 
 class ConsoleCommandRunner
 {
-private:
-	static const UInt32 kDefaultKeyPressTime = 50;
-	static std::stack<TESForm*> equipStack;
-
 public:
+
+	ConsoleCommandRunner(SpeechRecognitionClient*);
+
 
 	// Run either, will determine which of the further two messages
 	// should be called
 	//
 	// You should not call this from a game thread
-	static void RunCommand(std::string command);
+	void RunCommand(std::string command);
 
 
 	// Run a Skyrim console command
-	static void RunVanillaCommand(std::string command);
+	void RunVanillaCommand(std::string command);
+
+private:
+
+	void HandleCommands(const TokenList& tokens);
 
 	// Try run a custom command.
 	// Returns true if the command was run successful.
 	// Returns false if the command is not a custom command and the caller
 	// should add the command to another queue.
-	static bool TryRunCustomCommand(const std::string& command);
+	bool TryRunCustomCommand(const std::string& command);
 
 	//
 	// Add a new command:
@@ -83,7 +91,7 @@ public:
 	//         ; left hand magic
 	//         press  leftmousebutton 1000
 	//
-	static void CustomCommandPress(std::vector<std::string> params);
+	void CustomCommandPress(const TokenList& params);
 
 	//
 	// Add a new command:
@@ -96,7 +104,7 @@ public:
 	//         ; Press 3 keys at the same time (ctrl + alt + a):
 	//         tapkey ctrl alt a
 	//
-	static void CustomCommandTapKey(std::vector<std::string> params);
+	void CustomCommandTapKey(const TokenList& params);
 
 	//
 	// Add two new command:
@@ -113,8 +121,8 @@ public:
 	//         ; casting magic with double hands
 	//         holdkey leftmousebutton; sleep 1000; holdkey rightmousebutton; sleep 5000; releasekey leftmousebutton; sleep 3000; releasekey rightmousebutton
 	//
-	static void CustomCommandHoldKey(std::vector<std::string> params);
-	static void CustomCommandReleaseKey(std::vector<std::string> params);
+	void CustomCommandHoldKey(const TokenList& params);
+	void CustomCommandReleaseKey(const TokenList& params);
 
 	//
 	// Add a new command:
@@ -133,7 +141,7 @@ public:
 	//         ; Casting two dragon shouts one after another:
 	//         player.cast 0003f9ed player voice; sleep 3000; player.cast 00013f3a player voice
 	//
-	static void CustomCommandSleep(std::vector<std::string> params);
+	void CustomCommandSleep(const TokenList& params);
 
 	//
 	// Add a new command:
@@ -155,7 +163,7 @@ public:
 	//         ; Activate the Skyrim window and type in the console:
 	//         switchwindow; sleep 50; tapkey ~; sleep 50; tapkey s a v e enter; sleep 50; tapkey ~
 	//
-	static void CustomCommandSwitchWindow(std::vector<std::string> params);
+	void CustomCommandSwitchWindow(const TokenList& params);
 
 
 
@@ -180,8 +188,8 @@ public:
 	//         pushequip right
 	//         popequip left
 	//         popequip right
-	static void CustomCommandPushEquip(std::vector<std::string> params);
-	static void CustomCommandPopEquip(std::vector<std::string> params);
+	void CustomCommandPushEquip(const TokenList& params);
+	void CustomCommandPopEquip(const TokenList& params);
 
 	//
 	// Add a new command:
@@ -195,5 +203,12 @@ public:
 	// 
 	// Example:
 	//			trycast 00012FD0 right ; Shoot a firebolt from the right hand if the player is able
-	static void CustomCommandTryCast(std::vector<std::string> params);
+	void CustomCommandTryCast(const TokenList& params);
+
+private:
+	
+	std::map<std::string, void (ConsoleCommandRunner::*)(const TokenList& tokens)> commands;
+	const UInt32 kDefaultKeyPressTime = 50;
+	std::stack<TESForm*> equipStack;
+	IMenu* consoleMenu = NULL;
 };

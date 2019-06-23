@@ -27,7 +27,7 @@ Log::Log()
 Log* Log::instance = NULL;
 
 const char* LEVEL_NAMES[] = {
-	"TARCE",
+	"TRACE",
 	"DEBUG",
 	" INFO",
 	" WARN",
